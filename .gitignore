@@ -1,6 +1,12 @@
-# Rust 构建产物
-/target/
+# Rust / Cargo 构建产物
+target/
 **/*.rs.bk
+*.pdb
+*.profraw
+coverage/
+lcov.info
+
+# Vortex 是可执行应用，Cargo.lock 应提交到版本控制。
 
 # 密钥与本地环境
 .env
