@@ -87,9 +87,9 @@ UI 状态仍只在主循环中修改，后台任务只发送事件。取消流�
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy -p tui_demo --all-targets -- -D warnings
-cargo test -p tui_demo
-cargo run -p tui_demo
+cargo clippy -p tui-demo --all-targets -- -D warnings
+cargo test -p tui-demo
+cargo run -p tui-demo
 ```
 
 ## 推荐按键
