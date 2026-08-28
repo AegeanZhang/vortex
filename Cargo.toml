@@ -2,5 +2,5 @@
 resolver = "3"
 members = [
     "playground/hello_rust",
-    "playground/tui_demo",
+    "playground/tui-demo",
 ]
