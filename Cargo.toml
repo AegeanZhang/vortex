@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
 members = [
-    "playground/hello_rust",
+    "playground/hello-rust",
     "playground/tui-demo",
 ]
