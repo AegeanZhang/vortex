@@ -1,0 +1,11 @@
+[package]
+name = "vortex-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "vortex"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.6", features = ["derive"] }
