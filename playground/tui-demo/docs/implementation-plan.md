@@ -45,7 +45,7 @@ Crossterm/Tokio event -> Action -> update(AppState) -> draw(AppState)
 
 ## 分阶段实施
 
-### 1. 终端生命周期与静态布局
+### 1. 终端生命周期与静态布局（已完成）
 
 添加 `ratatui`、`crossterm` 依赖。进入 raw mode 和 alternate screen，创建 Terminal，绘制三个区域；同步读取按键，按 `q` 退出。使用 guard 或统一清理函数确保任何 `Result::Err` 都会恢复 raw mode、显示光标并离开 alternate screen。
 

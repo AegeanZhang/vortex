@@ -2,7 +2,7 @@
 
 Vortex 是一个计划使用 Rust 编写的通用终端 Agent，目标体验类似 Codex CLI 和 Claude Code：理解自然语言任务，在用户控制下读取工作区、调用工具、执行命令并持续完成任务。
 
-> 当前状态：设计与仓库准备阶段。仓库尚未包含可执行程序、Cargo workspace 或可用命令。
+> 当前状态：设计阶段 + 技术预研。Cargo workspace 已建立，但其中只有 `playground/` 下的学习实验，产品 crate（CLI/TUI、Agent 核心、Provider、工具与沙箱）尚未开始实现。
 
 ## 首版方向
 
@@ -16,15 +16,39 @@ Vortex 是一个计划使用 Rust 编写的通用终端 Agent，目标体验类�
 
 工具定义与 Provider 响应将归一化为内部事件模型，使 TUI、单次模式、会话记录和后续 Provider 共用同一执行核心。
 
+## 仓库结构
+
+```
+Cargo.toml                 # Rust 2024 workspace（resolver = "3"）
+README.md                  # 本文件：产品设计与仓库现状
+AGENTS.md                  # 协作规范（CLAUDE.md 为其指针）
+docs/research/             # 技术调研
+playground/                # 学习与验证用实验，不属于产品代码
+├── hello-rust/            # Rust 入门练习
+└── tui-demo/              # ratatui + crossterm 终端界面实验
+    └── docs/implementation-plan.md   # 分阶段方案与进度
+```
+
+`playground/` 下的 crate 只用于熟悉技术栈和验证方案，接口不做兼容承诺，产品实现开始后可能被替换或删除；各实验的进度记录在自己的计划文档里。
+
 ## 配置与安全
 
 普通配置计划从用户级和项目级 TOML 分层加载。API 密钥只允许通过环境变量提供，例如 `OPENAI_API_KEY` 和 `ANTHROPIC_API_KEY`，不得写入仓库或配置文件。非交互模式遇到需要审批的操作时应安全失败，除非用户显式选择相应权限策略。
 
+## 常用命令
+
+当前 workspace 内只有实验 crate，以下命令可用于检查它们：
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo run -p tui-demo          # 运行 TUI 实验，按 q 退出
+```
+
 ## Roadmap
 
-1. 初始化 Rust 2024 Cargo workspace，定义 Agent、Provider、Tool 和事件接口。
+1. 初始化 Rust 2024 Cargo workspace，定义 Agent、Provider、Tool 和事件接口。（workspace 已建立，接口定义待开始）
 2. 实现模型流式响应、工具循环、内置工具及自动化测试。
 3. 加入 TUI、JSONL 会话恢复、`bubblewrap` 沙箱和 stdio MCP client。
 4. 完善安装、CI、发布包、可观测性与跨平台抽象。
-
-在 Cargo 工程建立前，本仓库没有可运行的构建或测试命令。

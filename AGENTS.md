@@ -1,12 +1,16 @@
 # Repository Guidelines
 
-## 项目状态与结构
+## 项目结构
 
-Vortex 正处于 Rust CLI Agent 的设计阶段，当前仓库仅维护 `README.md`、本指南和忽略规则，尚无可执行代码。初始化实现时采用 Cargo workspace：CLI/TUI、Agent 核心、Provider 适配器以及工具与沙箱能力应拆分为职责清晰的 crate；共享接口不得依赖具体终端 UI 或模型服务。项目二进制名称统一为 `vortex`。
+Vortex 是一个 Rust CLI Agent，产品代码采用 Cargo workspace 组织：CLI/TUI、Agent 核心、Provider 适配器以及工具与沙箱能力拆分为职责清晰的 crate；共享接口不得依赖具体终端 UI 或模型服务。项目二进制名称统一为 `vortex`。
+
+`playground/` 下是学习与验证用的实验 crate，不属于产品代码。它们同样遵守本指南的风格、命令和提交约定，但产品 crate 不得依赖它们。
+
+本指南只记录不随进度变化的约定；当前完成到哪一步以 `README.md` 和各自的计划文档为准。
 
 ## 构建、测试与开发命令
 
-创建 `Cargo.toml` 后，提交前统一运行：
+提交前统一运行：
 
 ```bash
 cargo fmt --all -- --check
@@ -15,7 +19,7 @@ cargo test --workspace --all-features
 cargo build --release
 ```
 
-以上命令依次检查格式、静态问题、完整测试和发布构建。Cargo workspace 建立前不要声称这些命令已经可用，也不要提交占位实现来伪造通过结果。
+以上命令依次检查格式、静态问题、完整测试和发布构建。不要在未实际运行的情况下声称命令已通过，也不要提交占位实现来伪造通过结果。
 
 ## 编码风格与命名约定
 
