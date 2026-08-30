@@ -22,7 +22,9 @@ Vortex 是一个计划使用 Rust 编写的通用终端 Agent，目标体验类�
 Cargo.toml                 # Rust 2024 workspace（resolver = "3"）
 README.md                  # 本文件：产品设计与仓库现状
 AGENTS.md                  # 协作规范（CLAUDE.md 为其指针）
-docs/research/             # 技术调研
+docs/
+├── architecture.md        # 产品代码的目标架构与 crate 划分
+└── research/              # 技术调研
 playground/                # 学习与验证用实验，不属于产品代码
 ├── hello-rust/            # Rust 入门练习
 └── tui-demo/              # ratatui + crossterm 终端界面实验
