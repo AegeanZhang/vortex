@@ -1,0 +1,41 @@
+# 文档索引
+
+Vortex 的文档分四类。下面写清每份是什么、什么时候查。
+
+## 架构
+
+- [`architecture.md`](architecture.md) —— 产品代码的目标架构：crate 如何划分、依赖朝哪个方向走、按什么顺序落地。
+
+  **什么时候查**：新建 crate、决定某段代码放进哪个 crate、拿不准某处能否依赖另一个 crate 时。
+
+## 详细设计
+
+单个子系统的对外契约，是写代码时的直接依据。
+
+- [`design/cli-surface.md`](design/cli-surface.md) —— `vortex` 命令行接口：模式、参数、输出契约、退出码，以及各部分归属哪个落地阶段。
+
+  **什么时候查**：实现或修改 CLI 时。参数命名与语义以此为准，不要在代码里临时决定。
+
+## 调研
+
+技术选型与外部对照，回答"这个取舍为什么是这样"。
+
+- [`research/rust-tui-research.md`](research/rust-tui-research.md) —— TUI 技术选型，结论是 Ratatui + Crossterm + Tokio。
+- [`research/cli-design-research.md`](research/cli-design-research.md) —— Claude Code 与 Codex CLI 的接口对照，`design/cli-surface.md` 中若干决策的依据。
+
+  **什么时候查**：想改动某个已定的设计、觉得现有方案别扭时。先看调研里有没有已经权衡过的反例。
+
+## 用户手册
+
+- [`guide/getting-started.md`](guide/getting-started.md) —— 当前真实可运行的命令：构建、检查、运行实验。
+
+  **什么时候查**：刚接触这个仓库、想跑起来看看时。
+
+## 两条约定
+
+**文档只写设计与约定，不写进度。** 当前完成到哪一步以仓库根目录的 `README.md` 为准，
+各实验的进度记录在自己的计划文档里（如 `playground/tui-demo/docs/implementation-plan.md`）。
+把状态叙述写进设计文档，过期后会主动误导读者。
+
+**用户手册只写实际验证过的内容。** 尚未实现的命令属于设计，写在 `design/` 下并标明目标形态，
+不要写进手册——手册描述不存在的行为，比没有手册更糟。

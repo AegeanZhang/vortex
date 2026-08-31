@@ -9,8 +9,11 @@ vortex/
 ├── Cargo.toml                  # workspace + [workspace.dependencies] 统一版本
 ├── rust-toolchain.toml         # 固定稳定版，本地与 CI 一致
 ├── docs/
+│   ├── README.md               # 文档索引
 │   ├── architecture.md         # 本文件
-│   └── research/               # 技术调研
+│   ├── design/                 # 详细设计
+│   ├── research/               # 技术调研
+│   └── guide/                  # 用户手册
 ├── crates/
 │   ├── vortex-core/            # 抽象与执行核心，不依赖任何兄弟 crate
 │   │   └── src/

@@ -2,7 +2,7 @@
 
 - 调研日期：2026-08-30
 - 适用项目：Vortex CLI Agent
-- 状态：已采纳，对应修订见 `docs/cli-surface.md`
+- 状态：已采纳，对应修订见 `docs/design/cli-surface.md`
 - 调研对象版本：Claude Code 2.1.251、codex-cli 0.151.0（本机实测）
 
 ## 方法与可信度
@@ -117,7 +117,7 @@ Codex 另有 `-p/--profile` 在基础配置之上叠加命名配置层。
 
 ## 采纳的修订
 
-对应修改已落在 `docs/cli-surface.md`：
+对应修改已落在 `docs/design/cli-surface.md`：
 
 1. 新增 `-o, --output-last-message <FILE>`，解决 `--json` 下无法单独取得最终答复的矛盾。
 2. `--approval` 由四档收敛为 `on-request` 与 `never` 两档。
