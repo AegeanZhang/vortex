@@ -24,6 +24,7 @@ README.md                  # 本文件：产品设计与仓库现状
 AGENTS.md                  # 协作规范（CLAUDE.md 为其指针）
 docs/
 ├── architecture.md        # 产品代码的目标架构与 crate 划分
+├── cli-surface.md         # vortex 命令行接口设计
 └── research/              # 技术调研
 playground/                # 学习与验证用实验，不属于产品代码
 ├── hello-rust/            # Rust 入门练习
