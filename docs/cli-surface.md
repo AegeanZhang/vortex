@@ -2,7 +2,7 @@
 
 本文档定义 `vortex` 二进制对外的**目标接口**：支持哪些模式、有哪些参数、输出与退出码的契约。它是兼容性承诺的依据，因此参数命名一次定清楚，实现则分阶段推进。
 
-架构层面的 crate 划分见 `architecture.md`；当前实现进度见仓库根目录的 `README.md`。
+架构层面的 crate 划分见 `architecture.md`；当前实现进度见仓库根目录的 `README.md`。本文档中若干取舍的依据见 `research/cli-design-research.md`（Claude Code 与 Codex CLI 的接口对照）。
 
 ## 设计前提
 
@@ -33,7 +33,9 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
     --list              列出可恢复的会话后退出，不载入任何会话
 ```
 
-`--last` 与位置参数 `<SESSION_ID>` 互斥，同时给出时报错；两者都不给且未指定 `--list` 时同样报错，不做"猜一个"的隐式行为。`--list` 与 `TASK` 同时出现时报错。
+`--last` 与位置参数 `<SESSION_ID>` 互斥，同时给出时报错，不做"猜一个"的隐式行为。`--list` 与 `TASK` 同时出现时报错。
+
+两者都不给且未指定 `--list` 时，目标行为是**打开交互式会话选择器**；在 TUI 就绪（阶段 3）之前，该情形报错并提示使用 `--last` 或显式 id。
 
 采用显式子命令而非隐式默认子命令：若允许 `vortex "<task>"` 直接执行，任务文本恰好等于某个子命令名时行为不可预测，且以后每新增一个子命令都会追溯性地改变旧命令的含义。
 
@@ -46,11 +48,12 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
     --provider <NAME>             选择 provider（配置中的命名 profile）
 -C, --cd <DIR>                    切换工作目录，同时作为沙箱可写边界的锚点
 -c, --config <KEY=VALUE>          覆盖单个配置项，可重复
-    --approval <POLICY>           untrusted | on-request | on-failure | never
-    --sandbox <MODE>              read-only | workspace-write | full-access
+    --approval <POLICY>           on-request | never
+    --sandbox <MODE>              read-only | workspace-write | danger-full-access
     --full-auto                   别名：--approval never --sandbox workspace-write
-    --dangerously-bypass-sandbox  别名：--approval never --sandbox full-access
+    --dangerously-bypass-sandbox  别名：--approval never --sandbox danger-full-access
     --json                        以 JSONL 事件流输出
+-o, --output-last-message <FILE>  把最终答复另行写入文件
     --color <WHEN>                auto | always | never
 -v, --verbose                     提高日志级别，可重复
 -q, --quiet                       降低日志级别
@@ -60,6 +63,10 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 
 `--approval` 回答"什么时候问我"，`--sandbox` 回答"进程能碰什么"，两者正交。CI 场景的典型需求是"不要问我（`never`）但沙箱仍然严格（`workspace-write`）"，合并成单一档位无法表达这种组合，而档位一旦发布再拆分是破坏性变更。
 
+审批只设两档。更细的中间状态（如"仅在命令失败后询问"）应先以别名形式提供，等出现真实用例再考虑提升为独立档位——档位的边界需要文档解释，而别名可以自解释。
+
+沙箱的危险档位命名为 `danger-full-access` 而非 `full-access`，使警告写在枚举值本身：该值出现在配置文件或 `-c` 覆盖中时同样刺眼，而不只在 flag 名上带警告。
+
 `--full-auto` 与 `--dangerously-bypass-sandbox` 只是常用组合的别名。别名与其展开后的参数**同时出现时报错**，不做静默覆盖——静默覆盖会让人以为自己设置的策略生效了。
 
 `--dangerously-bypass-sandbox` 刻意起得长而刺眼，使其在 shell 历史和 CI 配置中一眼可辨。
@@ -68,6 +75,7 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 
 - **人类可读模式**：过程性输出（进度、工具调用、审批提示）写入 **stderr**，模型的最终答复写入 **stdout**。这样 `vortex run "..." > answer.md` 得到的是干净的答复，而不是混着进度的日志。
 - **`--json`**：stdout 为每行一个 JSON 对象的事件流，事件类型直接对应 `vortex-core::event` 中的内部事件模型；日志与诊断信息仍走 stderr。
+- **`-o, --output-last-message <FILE>`**：把最终答复另行写入指定文件。`--json` 开启时 stdout 已被事件流占用，调用方若只想要最终答复，就只能自行解析事件流；此参数填补该情形。它与 `--json` 组合使用，单独使用时最终答复仍照常写入 stdout。
 - 检测到 stdout 非 TTY 时自动关闭颜色与动画，因此不需要单独的 `--no-color`；`--color always` 用于强制保留颜色（如输出交给 `less -R`）。
 - 首版**不承诺 JSONL 事件 schema 的向后兼容**。每条事件携带 schema 版本字段，待出现外部消费者后再冻结格式。
 
@@ -91,7 +99,7 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 
 | 阶段 | 本文档中落地的部分 |
 | --- | --- |
-| 1 打通闭环 | `run <TASK>`、`-m/--model`、`--provider`、`--json`、退出码 0 / 1 / 2、stdout 与 stderr 的分工、非 TTY 时自动关闭颜色 |
+| 1 打通闭环 | `run <TASK>`、`-m/--model`、`--provider`、`--json`、`-o/--output-last-message`、退出码 0 / 1 / 2、stdout 与 stderr 的分工、非 TTY 时自动关闭颜色 |
 | 2 工具与沙箱 | `--approval`、`--sandbox`、两个别名、退出码 3、`-C`、`-c` |
 | 3 交互 | 默认 TUI、`resume` 全部形态、`--last` / `--list`、`--color` 开关、退出码 130 |
 
@@ -104,7 +112,7 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 - 别名测试：`--full-auto` 正确展开；`--full-auto --approval on-request` 报错而非静默取其一。
 - 退出码测试，重点是 3 与 1 的分界：非交互模式下触发审批应得到 3。
 - stdin 路径：`run -` 完整读取标准输入。
-- 输出分流：断言最终答复在 stdout、进度在 stderr。
+- 输出分流：断言最终答复在 stdout、进度在 stderr；`--json` 与 `-o` 并用时，事件流在 stdout 而最终答复可从文件取得。
 
 ## 待定项
 
@@ -112,7 +120,9 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 
 - `--timeout <DURATION>` 与 `--max-turns <N>`：自动化场景防止跑飞，需要先明确超时后会话如何落盘。
 - `--no-project-instructions`：跳过分层 `AGENTS.md` 读取，用于排查指令来源。
-- `--config-file <PATH>`：绕过分层加载直接指定配置，与"分层加载"的设计意图存在张力。
+- `--setting-sources <user,project,local>`：显式控制加载哪几层配置。比"绕过分层直接指定配置文件"更贴合分层加载的设计意图。
+- `--strict-config`：配置中出现本版本不认识的字段时报错，而非静默忽略。
+- stdin 的双语义：同时给出 `TASK` 与管道输入时，是否将管道内容作为附加上下文，而非仅支持 `TASK` 为 `-` 的情形。
 - `resume --list` 的输出格式：人类可读表格与 `--json` 的对应关系。
 
 ## 已否决的方案
