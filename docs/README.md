@@ -1,12 +1,21 @@
 # 文档索引
 
-Vortex 的文档分四类。下面写清每份是什么、什么时候查。
+Vortex 的文档分为架构、工程规范、详细设计、调研和用户手册五类。下面写清每份是什么、什么时候查。
 
 ## 架构
 
-- [`architecture.md`](architecture.md) —— 产品代码的目标架构：crate 如何划分、依赖朝哪个方向走、按什么顺序落地。
+- [`architecture/README.md`](architecture/README.md) —— 架构文档入口，包含系统总览、仓库组织、技术选型与术语表。
 
   **什么时候查**：新建 crate、决定某段代码放进哪个 crate、拿不准某处能否依赖另一个 crate 时。
+
+## 工程规范
+
+- [`engineering/coding-style.md`](engineering/coding-style.md) —— Rust 格式与命名约定。
+- [`engineering/testing.md`](engineering/testing.md) —— 测试组织和提交前检查命令。
+- [`engineering/git-workflow.md`](engineering/git-workflow.md) —— Commit、分支与 Pull Request 约定。
+- [`engineering/review-checklist.md`](engineering/review-checklist.md) —— Review 时检查架构、正确性与安全性的清单。
+
+  **什么时候查**：编写、检查或提交代码与文档时。
 
 ## 详细设计
 

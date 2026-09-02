@@ -1,38 +1,28 @@
 # Repository Guidelines
 
-## 项目结构
+## 项目定位与规范入口
 
-Vortex 是一个 Rust CLI Agent，产品代码采用 Cargo workspace 组织：CLI/TUI、Agent 核心、Provider 适配器以及工具与沙箱能力拆分为职责清晰的 crate；共享接口不得依赖具体终端 UI 或模型服务。项目二进制名称统一为 `vortex`。
+Vortex 是一个用于学习 Rust 与 CLI Agent 实现细节的 Rust CLI Agent。产品代码采用 Cargo workspace 组织，`playground/` 下的实验 crate 不属于产品代码，产品 crate 不得依赖它们。
 
-`playground/` 下是学习与验证用的实验 crate，不属于产品代码。它们同样遵守本指南的风格、命令和提交约定，但产品 crate 不得依赖它们。
+本文件只保留 Agent 开始工作前必须知道的修改边界与规范入口，详细约定以对应专题文档为准：
 
-本指南只记录不随进度变化的约定；当前完成到哪一步以 `README.md` 和各自的计划文档为准。
+- 架构、crate 职责、技术选型与术语：[`docs/architecture/README.md`](docs/architecture/README.md)
+- 编码、测试、Git 与 Review 规范：[`docs/engineering/README.md`](docs/engineering/README.md)
+- 详细设计、调研和用户手册索引：[`docs/README.md`](docs/README.md)
+- 当前实现进度：[`README.md`](README.md) 和各实验的计划文档
 
-## 构建、测试与开发命令
+## 学习模式与修改边界
 
-提交前统一运行：
+本项目用于作者亲自手写代码，以学习和深入理解 Rust、CLI Agent 及其实现细节。
 
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-cargo build --release
-```
+- 在用户任务相关范围内，Codex 和 Claude Code 可以主动创建、修改、移动或删除项目文档，无需逐次取得授权。项目文档包括 `README.md`、`AGENTS.md`、`CLAUDE.md` 以及 `docs/` 下的内容。
+- 未经作者明确要求或授权，不得修改、创建、删除或重命名源码、测试、Cargo manifest、`Cargo.lock`、脚本、运行时配置、示例配置或其他非文档项目文件。
+- “review”“解释”“诊断”“给方案”等请求不代表修改代码或配置的授权。发现问题时，应指出文件位置、原因和建议方案，然后等待作者决定，不得顺手修复。
+- “commit”只授权暂存并提交已有改动，不授权格式化、修复或重写代码与配置。
+- 未经授权不得运行会修改源码的命令，例如 `cargo fmt`、`cargo fix`；可以运行 `cargo fmt --all -- --check` 等只读检查。运行可能更新 `Cargo.lock` 的命令时优先使用 `--locked`。
+- 只有收到“修改”“实现”“修复”“重构”等明确指令后，才能在指定范围内编辑代码或配置，并应保持改动最小。
+- 不得在未实际运行的情况下声称检查已经通过，也不得提交占位实现来伪造通过结果。
 
-以上命令依次检查格式、静态问题、完整测试和发布构建。不要在未实际运行的情况下声称命令已通过，也不要提交占位实现来伪造通过结果。
+## 工作要求
 
-## 编码风格与命名约定
-
-使用稳定版 Rust 和 2024 edition，接受 `rustfmt` 默认格式。模块、Rust 文件、函数和变量使用 `snake_case`，类型与 trait 使用 `PascalCase`，常量使用 `SCREAMING_SNAKE_CASE`；Cargo package 和非 Rust 文件使用英文 `kebab-case`。错误应保留上下文，库层返回结构化错误，CLI 层负责面向用户的中文提示。异步代码统一基于 Tokio，避免阻塞 executor。
-
-## 架构与安全约束
-
-Provider、Tool、会话存储和 UI 通过内部事件模型解耦。工具参数使用 JSON Schema 描述；文件修改、Shell、MCP 工具均经过同一权限策略。Linux 默认以当前工作区为可写边界，并通过 `bubblewrap` 禁止网络；不得绕过审批执行越界操作。API 密钥只能从环境变量读取，日志和错误信息必须脱敏。项目指令按目录层级读取 `AGENTS.md`，越接近当前目录的规则优先。
-
-## 测试指南
-
-单元测试与实现放在同一模块，跨 crate 行为置于 `tests/`。Provider 使用固定流事件或本地 mock server 测试，禁止依赖真实付费 API；文件和 Shell 工具必须覆盖路径越界、取消、超时、非零退出及输出截断。涉及 TUI 时测试状态机，并人工验证终端退出后恢复原始模式。
-
-## Commit 与 Pull Request
-
-Commit 使用简短、动词开头的中文主题，每个提交只处理一个目的。Pull Request 需说明目标、关键设计、风险、测试命令和结果，并关联相关 issue。终端 UI 变化附截图或录屏；权限、配置或 Provider 行为变化必须给出兼容性与安全影响。
+开始任务前按工作内容阅读对应的架构、设计与工程规范。规范冲突时，越具体、越接近目标文件的文档优先；仍无法判断时先向作者说明冲突。

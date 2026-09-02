@@ -2,7 +2,7 @@
 
 本文档定义 `vortex` 二进制对外的**目标接口**：支持哪些模式、有哪些参数、输出与退出码的契约。它是兼容性承诺的依据，因此参数命名一次定清楚，实现则分阶段推进。
 
-架构层面的 crate 划分见 `../architecture.md`；当前实现进度见仓库根目录的 `README.md`。本文档中若干取舍的依据见 `../research/cli-design-research.md`（Claude Code 与 Codex CLI 的接口对照）。
+架构层面的 crate 划分见 `../architecture/overview.md`；当前实现进度见仓库根目录的 `README.md`。本文档中若干取舍的依据见 `../research/cli-design-research.md`（Claude Code 与 Codex CLI 的接口对照）。
 
 ## 设计前提
 
@@ -95,7 +95,7 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 
 ## 分阶段落地
 
-阶段划分对应 `../architecture.md` 中的 crate 落地顺序。
+阶段划分对应 `../architecture/overview.md` 中的 crate 落地顺序。
 
 | 阶段 | 本文档中落地的部分 |
 | --- | --- |

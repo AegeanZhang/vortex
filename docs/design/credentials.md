@@ -2,7 +2,7 @@
 
 本文档定义 Vortex 如何获取 Provider 的 API 密钥：密钥从哪里来、`.env` 的定位、配置文件中记录什么、日志如何脱敏。
 
-架构层面的 crate 划分见 [`../architecture.md`](../architecture.md)；命令行参数契约见 [`cli-surface.md`](cli-surface.md)；本文档取舍的依据见 [`../research/credential-handling-research.md`](../research/credential-handling-research.md)。
+架构层面的 crate 划分见 [`../architecture/overview.md`](../architecture/overview.md)；命令行参数契约见 [`cli-surface.md`](cli-surface.md)；本文档取舍的依据见 [`../research/credential-handling-research.md`](../research/credential-handling-research.md)。
 
 ## 设计前提
 
