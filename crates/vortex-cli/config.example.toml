@@ -1,0 +1,27 @@
+# Vortex TOML 配置示例
+#
+# 本文件用于说明配置结构。正式实现将从用户级和项目级 TOML 分层加载；
+# 具体路径与覆盖规则将在配置加载设计中定义。
+#
+# 密钥不写在本文件里。这里只记录环境变量的名称，运行时再从进程环境读取值。
+# 配套的环境变量清单见同目录的 .env.example。
+# 详细规则见 docs/design/credentials.md。
+
+# 默认使用哪个 provider；命令行 --provider <NAME> 可覆盖。
+provider = "deepseek"
+
+# DeepSeek：OpenAI 兼容的 Chat Completions 接口。
+[providers.deepseek]
+kind = "openai-chat"
+base_url = "https://api.deepseek.com"
+# 模型名会变动，以 Provider 官方文档为准。
+model = "deepseek-v4-flash"
+# API Key 的来源：环境变量名，不是值。
+api_key_env = "DEEPSEEK_API_KEY"
+
+# 再加一个 provider 时照抄下面的形状并取消注释：
+# [providers.my-provider]
+# kind = "openai-chat"
+# base_url = "https://example.com/v1"
+# model = "<模型名>"
+# api_key_env = "MY_PROVIDER_API_KEY"

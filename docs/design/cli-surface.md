@@ -21,10 +21,10 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 | 形态 | 语义 |
 | --- | --- |
 | `vortex` | 进入 TUI，开启新会话 |
-| `vortex run <TASK>` | 单次执行一轮后退出；`TASK` 为 `-` 时从 stdin 读取 |
+| `vortex exec <TASK>` | 单次执行一轮后退出；`TASK` 为 `-` 时从 stdin 读取 |
 | `vortex resume [--last \| <SESSION_ID>] [TASK]` | 载入已有会话；给出 `TASK` 则按单次模式执行，未给出则进入 TUI |
 
-`run` 的 `TASK` 必填，否则与裸 `vortex` 语义重复；`resume` 的 `TASK` 可选。这样 `run` 与 `resume` 的唯一差别是"开新会话"还是"续旧会话"，任务参数的含义在两者之间保持一致。
+`exec` 的 `TASK` 必填，否则与裸 `vortex` 语义重复；`resume` 的 `TASK` 可选。这样 `exec` 与 `resume` 的唯一差别是"开新会话"还是"续旧会话"，任务参数的含义在两者之间保持一致。
 
 ### resume 的专属参数
 
@@ -73,7 +73,7 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 
 ## 输出契约
 
-- **人类可读模式**：过程性输出（进度、工具调用、审批提示）写入 **stderr**，模型的最终答复写入 **stdout**。这样 `vortex run "..." > answer.md` 得到的是干净的答复，而不是混着进度的日志。
+- **人类可读模式**：过程性输出（进度、工具调用、审批提示）写入 **stderr**，模型的最终答复写入 **stdout**。这样 `vortex exec "..." > answer.md` 得到的是干净的答复，而不是混着进度的日志。
 - **`--json`**：stdout 为每行一个 JSON 对象的事件流，事件类型直接对应 `vortex-core::event` 中的内部事件模型；日志与诊断信息仍走 stderr。
 - **`-o, --output-last-message <FILE>`**：把最终答复另行写入指定文件。`--json` 开启时 stdout 已被事件流占用，调用方若只想要最终答复，就只能自行解析事件流；此参数填补该情形。它与 `--json` 组合使用，单独使用时最终答复仍照常写入 stdout。
 - 检测到 stdout 非 TTY 时自动关闭颜色与动画，因此不需要单独的 `--no-color`；`--color always` 用于强制保留颜色（如输出交给 `less -R`）。
@@ -99,11 +99,11 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 
 | 阶段 | 本文档中落地的部分 |
 | --- | --- |
-| 1 打通闭环 | `run <TASK>`、`-m/--model`、`--provider`、`--json`、`-o/--output-last-message`、退出码 0 / 1 / 2、stdout 与 stderr 的分工、非 TTY 时自动关闭颜色 |
+| 1 打通闭环 | `exec <TASK>`、`-m/--model`、`--provider`、`--json`、`-o/--output-last-message`、退出码 0 / 1 / 2、stdout 与 stderr 的分工、非 TTY 时自动关闭颜色 |
 | 2 工具与沙箱 | `--approval`、`--sandbox`、两个别名、退出码 3、`-C`、`-c` |
 | 3 交互 | 默认 TUI、`resume` 全部形态、`--last` / `--list`、`--color` 开关、退出码 130 |
 
-阶段 1 只实现 `run`，但**参数命名与语义按本文档的最终形态定义**，后续阶段只填充实现，不改动已发布的参数名。
+阶段 1 只实现 `exec`，但**参数命名与语义按本文档的最终形态定义**，后续阶段只填充实现，不改动已发布的参数名。
 
 ## 测试要求
 
@@ -111,7 +111,7 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 - 表驱动测试：给定命令行，断言解析出的配置结构。覆盖子命令前后书写全局参数的两种写法。
 - 别名测试：`--full-auto` 正确展开；`--full-auto --approval on-request` 报错而非静默取其一。
 - 退出码测试，重点是 3 与 1 的分界：非交互模式下触发审批应得到 3。
-- stdin 路径：`run -` 完整读取标准输入。
+- stdin 路径：`exec -` 完整读取标准输入。
 - 输出分流：断言最终答复在 stdout、进度在 stderr；`--json` 与 `-o` 并用时，事件流在 stdout 而最终答复可从文件取得。
 
 ## 待定项
@@ -134,5 +134,5 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 | 单一 `--mode <safe\|auto\|yolo>` | 把两个正交维度压成一个档位，无法表达"不问我但严沙箱"，后续拆分是破坏性变更 |
 | 仅 `-y` 与 `--no-sandbox` | 将分级安全策略压成布尔值，与"越界操作由用户按需审批"的分级设想不符 |
 | 无子命令、模式用 flag 区分 | 三种模式的专属参数挤在同一平面，互斥关系只能在运行时校验，`--help` 迅速变得难读 |
-| `run` 作为隐式默认子命令 | 位置参数与子命令同层产生真实歧义，且新增子命令会追溯性改变旧命令含义 |
+| `exec` 作为隐式默认子命令 | 位置参数与子命令同层产生真实歧义，且新增子命令会追溯性改变旧命令含义 |
 | `vortex login` 等密钥管理子命令 | 与"API 密钥只能来自环境变量、不得写入配置文件"的安全约束冲突 |

@@ -6,7 +6,7 @@ Vortex 是一个计划使用 Rust 编写的通用终端 Agent，目标体验类�
 
 ## 首版方向
 
-- Linux 优先，提供交互式 TUI；同时规划 `vortex run "<task>"` 单次执行模式。
+- Linux 优先，提供交互式 TUI；同时规划 `vortex exec "<task>"` 单次执行模式。
 - 采用可插拔 Provider 架构，计划支持 OpenAI Responses API、OpenAI-compatible Chat Completions 和 Anthropic Messages API。
 - 内置文件读取、内容搜索、补丁编辑和 Shell 工具，并通过 stdio 接入 MCP Server。
 - 默认使用 `bubblewrap` 限制写入当前工作区并关闭网络；越界操作由用户按需审批。

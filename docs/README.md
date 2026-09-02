@@ -16,12 +16,17 @@ Vortex 的文档分四类。下面写清每份是什么、什么时候查。
 
   **什么时候查**：实现或修改 CLI 时。参数命名与语义以此为准，不要在代码里临时决定。
 
+- [`design/credentials.md`](design/credentials.md) —— 密钥从哪里来、`.env` 的定位、Provider 配置形状、日志脱敏规则。
+
+  **什么时候查**：接入新 Provider、处理 API 密钥、写任何会记录请求内容的日志时。
+
 ## 调研
 
 技术选型与外部对照，回答"这个取舍为什么是这样"。
 
 - [`research/rust-tui-research.md`](research/rust-tui-research.md) —— TUI 技术选型，结论是 Ratatui + Crossterm + Tokio。
 - [`research/cli-design-research.md`](research/cli-design-research.md) —— Claude Code 与 Codex CLI 的接口对照，`design/cli-surface.md` 中若干决策的依据。
+- [`research/credential-handling-research.md`](research/credential-handling-research.md) —— 两者如何处理 API 密钥与 `.env`，`design/credentials.md` 的依据。
 
   **什么时候查**：想改动某个已定的设计、觉得现有方案别扭时。先看调研里有没有已经权衡过的反例。
 

@@ -53,7 +53,7 @@ vortex-tools ──> vortex-sandbox        # Shell 与文件写入必须过沙�
 
 1. **`vortex-core` 不依赖任何兄弟 crate**，也不依赖 `ratatui`、`reqwest` 这类具体实现库。它只定义事件、trait、配置和错误。
 2. **只有 `vortex-cli` 认识全部具体实现。** provider、tools、sandbox 和 UI 在 `wiring.rs` 中组装；更换 Provider 或更换 UI 只应改动这一个文件。
-3. **TUI 与单次模式共用同一份事件流。** `vortex run "<task>"` 是把 `event.rs` 的事件渲染成纯文本输出，而不是另写一套执行循环。这是"共用同一执行核心"能否成立的关键，任何绕过事件模型的捷径都会让两种模式行为漂移。
+3. **TUI 与单次模式共用同一份事件流。** `vortex exec "<task>"` 是把 `event.rs` 的事件渲染成纯文本输出，而不是另写一套执行循环。这是"共用同一执行核心"能否成立的关键，任何绕过事件模型的捷径都会让两种模式行为漂移。
 
 ## 各 crate 职责
 

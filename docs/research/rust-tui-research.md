@@ -8,7 +8,7 @@
 
 首版建议采用 **Ratatui + Crossterm + Tokio**：Ratatui 负责布局、组件和差量绘制，Crossterm 负责 raw mode、alternate screen、键鼠及终端事件，Tokio 统一承载模型流、工具执行和 UI 事件。多行输入优先使用 `tui-textarea`，但应封装为项目自己的 `PromptEditor`，避免业务状态依赖第三方控件 API。
 
-首版使用全屏 alternate screen，内部维护消息滚动；渲染层保留 viewport 抽象，以便以后增加 inline 模式。交互 TUI 写入 `stderr`，`vortex run` 的最终结果或结构化输出写入 `stdout`，保证管道调用可用。
+首版使用全屏 alternate screen，内部维护消息滚动；渲染层保留 viewport 抽象，以便以后增加 inline 模式。交互 TUI 写入 `stderr`，`vortex exec` 的最终结果或结构化输出写入 `stdout`，保证管道调用可用。
 
 ## 需求侧重点
 

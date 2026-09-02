@@ -53,7 +53,7 @@ cargo run -p tui-demo
 `cargo build` 会产出 `target/debug/vortex` 二进制，但它**尚未实现任何产品命令**——
 既不能执行任务，也没有 TUI 和会话恢复。
 
-计划中的命令与参数（`vortex run`、`vortex resume`、审批与沙箱参数、输出契约、退出码）
+计划中的命令与参数（`vortex exec`、`vortex resume`、审批与沙箱参数、输出契约、退出码）
 全部记录在 [`../design/cli-surface.md`](../design/cli-surface.md)。该文档描述的是目标形态，
 实现按其中的阶段表推进；本手册会随实现逐步补充，只写已经跑通的部分。
 
