@@ -1,0 +1,6 @@
+[package]
+name = "vortex-provider"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
