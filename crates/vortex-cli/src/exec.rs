@@ -40,7 +40,8 @@ pub async fn execute(task: String) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new();
 
     let request = ChatRequest {
-        model: "deepseek-v4-flash".to_string(),
+        //model: "deepseek-v4-flash".to_string(),
+        model: "deepseek-v4-pro".to_string(),
         messages: vec![
             Message {
                 role: "system".to_string(),
