@@ -29,6 +29,10 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：接入新 Provider、处理 API 密钥、写任何会记录请求内容的日志时。
 
+- [`design/message-building.md`](design/message-building.md) —— 会话事件如何形成模型上下文，以及 Tool call、Token 预算和 Provider 映射规则。
+
+  **什么时候查**：实现 Agent loop、上下文压缩、工具调用或 Provider 请求转换时。
+
 ## 调研
 
 技术选型与外部对照，回答"这个取舍为什么是这样"。
