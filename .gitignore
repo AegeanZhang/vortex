@@ -12,6 +12,7 @@ lcov.info
 .env
 .env.*
 !.env.example
+*.local.*
 
 # Vortex 本地运行状态
 .vortex/sessions/
