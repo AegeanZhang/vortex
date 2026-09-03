@@ -1,6 +1,10 @@
-use std::process::ExitCode;
+use std::env::var;
+use std::error::Error;
+use std::result::Result;
 
-pub fn execute(_task: String) -> ExitCode {
-    eprintln!("错误：vortex exec 尚未实现");
-    ExitCode::FAILURE
+pub async fn execute(_task: String) -> Result<(), Box<dyn Error + Send + Sync>> {
+
+    let _api_key = var("DEEPSEEK_API_KEY")?;
+
+    Ok(())
 }

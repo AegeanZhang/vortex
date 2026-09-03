@@ -1,9 +1,7 @@
 mod exec;
 
-use std::process::ExitCode;
-
+use std::error::Error;
 use exec::execute;
-
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
@@ -28,14 +26,18 @@ enum Commands {
     Exec { prompt: String },
 }
 
-fn main() -> ExitCode {
+#[tokio::main]
+async fn main() ->Result<(), Box<dyn Error + Send + Sync>> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Exec { prompt }) => execute(prompt),
+        Some(Commands::Exec { prompt }) => {
+            execute(prompt).await?;
+        }
         None => {
             eprintln!("错误：交互式 TUI 尚未实现，请使用 vortex exec <TASK>");
-            ExitCode::FAILURE
         }
     }
+
+    Ok(())
 }
