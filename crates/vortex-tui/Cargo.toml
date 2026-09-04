@@ -1,0 +1,6 @@
+[package]
+name = "vortex-tui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

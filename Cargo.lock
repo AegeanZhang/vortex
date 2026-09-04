@@ -2098,7 +2098,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "vortex-core"
+version = "0.1.0"
+
+[[package]]
 name = "vortex-provider"
+version = "0.1.0"
+
+[[package]]
+name = "vortex-sandbox"
+version = "0.1.0"
+
+[[package]]
+name = "vortex-tools"
+version = "0.1.0"
+
+[[package]]
+name = "vortex-tui"
 version = "0.1.0"
 
 [[package]]

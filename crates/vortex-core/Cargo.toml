@@ -1,0 +1,6 @@
+[package]
+name = "vortex-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
