@@ -38,7 +38,8 @@ async fn main() ->Result<(), Box<dyn Error + Send + Sync>> {
             execute(prompt).await?;
         }
         None => {
-            run()?;
+            let tui_options = TuiOptions { color: None };
+            run(tui_options)?;
         }
     }
 

@@ -1,4 +1,4 @@
 
 pub struct TuiOptions {
-    color: Option<String>,
+    pub color: Option<String>,
 }
