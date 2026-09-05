@@ -4,6 +4,9 @@ use std::error::Error;
 use exec::execute;
 use clap::{Parser, Subcommand};
 
+use vortex_tui::run;
+use vortex_tui::tui_options::TuiOptions;
+
 #[derive(Parser, Debug)]
 #[command(name = "vortex", version, about = "A simple CLI Agent", long_about = None)]
 struct Cli {
@@ -35,7 +38,7 @@ async fn main() ->Result<(), Box<dyn Error + Send + Sync>> {
             execute(prompt).await?;
         }
         None => {
-            eprintln!("错误：交互式 TUI 尚未实现，请使用 vortex exec <TASK>");
+            run()?;
         }
     }
 

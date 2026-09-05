@@ -1,14 +1,8 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+use std::io::Error;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod tui_options;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+pub fn run() -> Result<(), Error> {
+    println!("交互式 TUI 尚未实现，请使用 vortex exec <TASK>");
+    Ok(())
 }

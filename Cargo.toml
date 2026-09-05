@@ -13,3 +13,4 @@ edition = "2024"
 
 [workspace.dependencies]
 vortex-provider = { path = "crates/vortex-provider" }
+vortex-tui = { path = "crates/vortex-tui" }

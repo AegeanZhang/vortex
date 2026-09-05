@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 vortex-provider.workspace = true
+vortex-tui.workspace = true
 
 clap = { version = "4.6.6", features = ["derive"] }
 futures-util = "0.3.34"
