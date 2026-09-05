@@ -36,6 +36,7 @@ vortex-tools ──> vortex-sandbox
 
 - Provider、Tool、会话存储和 UI 通过内部事件模型解耦。
 - 会话事件、内部语义消息和 Provider 请求保持分层，消息构建规则见 [`../design/message-building.md`](../design/message-building.md)。
+- TUI 只通过 Session snapshot、Agent command 和 Core event 与运行时交互，接口契约见 [`../design/tui-interface.md`](../design/tui-interface.md)。
 - 工具参数使用 JSON Schema 描述；文件修改、Shell 和 MCP 工具经过同一权限策略。
 - Linux 默认以当前工作区为可写边界，并通过 Bubblewrap 禁止网络；不得绕过审批执行越界操作。
 - API 密钥只从进程环境读取，日志和错误信息必须脱敏。详细规则见 [`../design/credentials.md`](../design/credentials.md)。

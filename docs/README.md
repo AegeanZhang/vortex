@@ -33,6 +33,10 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：实现 Agent loop、上下文压缩、工具调用或 Provider 请求转换时。
 
+- [`design/tui-interface.md`](design/tui-interface.md) —— TUI 与 Core/CLI 的接口、状态归属、事件流、终端生命周期和 `/model` 切换契约。
+
+  **什么时候查**：实现 `vortex-tui`、设计 Core UI 通道或增加终端交互时。
+
 ## 调研
 
 技术选型与外部对照，回答"这个取舍为什么是这样"。

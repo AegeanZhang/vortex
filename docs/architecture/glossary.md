@@ -12,6 +12,7 @@
 | Model request | Provider 无关的模型调用描述，由 Provider adapter 转换为实际 API 请求 |
 | Turn | 一次用户输入开始，到 Agent 给出结果或停止之间的执行周期 |
 | Session | 可持久化和恢复的多轮交互记录 |
+| Session connection | Core 向交互层提供的一致 Snapshot、命令入口和实时事件流 |
 | Approval | 对带副作用操作的用户授权决定 |
 | Sandbox | 在操作系统层限制文件、进程和网络访问的执行环境 |
 | TUI | 运行在终端中的交互式用户界面 |
