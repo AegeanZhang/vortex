@@ -1,32 +1,24 @@
+mod terminal;
+
+pub mod tui_options;
+
 use std::io::Error;
 use std::io;
 
 use crossterm::{
-    execute,
     event::{self, Event, KeyCode},
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, 
-        disable_raw_mode, enable_raw_mode}
 };
 use ratatui::{
-    backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     widgets::{Block, Borders, Paragraph},
-    Terminal
 };
+
 use crate::tui_options::TuiOptions;
+use crate::terminal::{TuiTerminal, enter};
 
-pub mod tui_options;
+pub fn run(_tui_potions: TuiOptions) -> Result<(), Error> {
 
-pub fn run(tui_potions: TuiOptions) -> Result<(), Error> {
-    let mut guard = TerminalGuard::new()?;
-
-    let stdout = std::io::stdout();
-    let backend = CrosstermBackend::new(stdout);
-
-    let mut terminal = Terminal::new(backend)?;
-
-    // 当前阶段没有文本输入，隐藏硬件光标可避免它停留在最后一次绘制位置。
-    terminal.hide_cursor()?;
+    let (mut terminal, mut guard) = enter()?;
 
     run_app(&mut terminal)?;
 
@@ -35,53 +27,7 @@ pub fn run(tui_potions: TuiOptions) -> Result<(), Error> {
     Ok(())
 }
 
-struct TerminalGuard {
-    active: bool,
-}
-
-impl TerminalGuard {
-    fn new() -> io::Result<Self> {
-        enable_raw_mode()?;
-
-        // 从 raw mode 生效后立即接管清理；后续初始化失败时 Drop 也能恢复终端。
-        let guard = Self { active: true };
-
-        let mut stdout = std::io::stdout();
-
-        execute!(stdout, EnterAlternateScreen)?;
-
-        Ok(guard)
-    }
-
-    fn cleanup(&mut self) -> io::Result<()> {
-        if !self.active {
-            return Ok(());
-        }
-
-        disable_raw_mode()?;
-
-        let mut stdout = std::io::stdout();
-        execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show)?;
-
-        self.active = false;
-
-        Ok(())
-    }
-}
-
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        if self.active {
-            let _ = disable_raw_mode();
-
-            let mut stdout = std::io::stdout();
-
-            let _ = execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show);
-        }
-    }
-}
-
-fn run_app(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> io::Result<()> {
+fn run_app(terminal: &mut TuiTerminal) -> io::Result<()> {
     loop {
         terminal.draw(|frame| {
             let area = frame.area();
