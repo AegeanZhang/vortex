@@ -6,3 +6,4 @@ edition.workspace = true
 [dependencies]
 crossterm = "0.29"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
+ratatui-textarea = "0.9.2"
