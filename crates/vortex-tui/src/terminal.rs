@@ -1,12 +1,9 @@
-use std::io::{self, Result, Stdout};
-use ratatui::{
-    backend::CrosstermBackend,
-    Terminal,
-};
 use crossterm::{
-    terminal::{enable_raw_mode, disable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use ratatui::{Terminal, backend::CrosstermBackend};
+use std::io::{self, Result, Stdout};
 
 // 定义终端类型别名, 方便在其他模块中使用
 pub(crate) type TuiTerminal = Terminal<CrosstermBackend<Stdout>>;

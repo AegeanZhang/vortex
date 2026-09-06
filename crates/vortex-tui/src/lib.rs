@@ -2,22 +2,19 @@ mod terminal;
 
 pub mod tui_options;
 
-use std::io::Error;
 use std::io;
+use std::io::Error;
 
-use crossterm::{
-    event::{self, Event, KeyCode},
-};
+use crossterm::event::{self, Event, KeyCode};
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     widgets::{Block, Borders, Paragraph},
 };
 
-use crate::tui_options::TuiOptions;
 use crate::terminal::{TuiTerminal, enter};
+use crate::tui_options::TuiOptions;
 
 pub fn run(_tui_potions: TuiOptions) -> Result<(), Error> {
-
     let (mut terminal, mut guard) = enter()?;
 
     run_app(&mut terminal)?;
