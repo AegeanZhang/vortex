@@ -5,7 +5,7 @@ use exec::execute;
 use clap::{Parser, Subcommand};
 
 use vortex_tui::run;
-use vortex_tui::tui_options::TuiOptions;
+use vortex_tui::options::TuiOptions;
 
 #[derive(Parser, Debug)]
 #[command(name = "vortex", version, about = "A simple CLI Agent", long_about = None)]

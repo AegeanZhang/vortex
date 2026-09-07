@@ -1,14 +1,14 @@
 mod terminal;
 mod ui;
 
-pub mod tui_options;
+pub mod options;
 
 use crossterm::event::{self, Event, KeyCode};
 use std::io;
 use std::io::Error;
 
 use crate::terminal::{TuiTerminal, enter};
-use crate::tui_options::TuiOptions;
+use crate::options::TuiOptions;
 
 use crate::ui::render;
 
