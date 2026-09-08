@@ -1,3 +1,5 @@
+mod action;
+mod app;
 mod terminal;
 mod ui;
 
@@ -7,8 +9,10 @@ use crossterm::event::{self, Event, KeyCode};
 use std::io;
 use std::io::Error;
 
-use crate::terminal::{TuiTerminal, enter};
+use crate::action::UiAction;
+use crate::app::{AppState, update};
 use crate::options::TuiOptions;
+use crate::terminal::{TuiTerminal, enter};
 
 use crate::ui::render;
 
@@ -22,21 +26,21 @@ pub fn run(_tui_potions: TuiOptions) -> Result<(), Error> {
     Ok(())
 }
 
+fn map_event(event: Event) -> Option<UiAction> {
+    match event {
+        Event::Key(key) if key.code == KeyCode::Char('q') => Some(UiAction::Quit),
+        _ => None,
+    }
+}
+
 fn run_app(terminal: &mut TuiTerminal) -> io::Result<()> {
-    loop {
-        terminal.draw(render)?;
+    let mut state = AppState::default();
 
-        // 同步等待事件
-        let event = event::read()?;
+    while !state.exit_requested() {
+        terminal.draw(|frame| render(frame, &state))?;
 
-        match event {
-            Event::Key(key) if key.code == KeyCode::Char('q') => {
-                break;
-            }
-
-            Event::Resize(_, _) => {}
-
-            _ => {}
+        if let Some(action) = map_event(event::read()?) {
+            update(&mut state, action);
         }
     }
 

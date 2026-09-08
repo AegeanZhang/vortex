@@ -1,3 +1,5 @@
+use crate::app::AppState;
+
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -18,7 +20,7 @@ fn sections(area: Rect) -> [Rect; 3] {
     [chunks[0], chunks[1], chunks[2]]
 }
 
-pub(crate) fn render(frame: &mut Frame<'_>) {
+pub(crate) fn render(frame: &mut Frame<'_>, state: &AppState) {
     let [header_area, main_area, footer_area] = sections(frame.area());
 
     // 绘制顶部标题栏
@@ -29,7 +31,7 @@ pub(crate) fn render(frame: &mut Frame<'_>) {
         .block(Block::default().borders(Borders::ALL));
     frame.render_widget(main, main_area);
 
-    let footer = Paragraph::new("Status: Running").block(Block::default().borders(Borders::ALL));
+    let footer = Paragraph::new(state.status_line()).block(Block::default().borders(Borders::ALL));
     frame.render_widget(footer, footer_area);
 }
 
@@ -52,7 +54,9 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        terminal.draw(render).unwrap();
+        let state = AppState::default();
+
+        terminal.draw(|frame| render(frame, &state)).unwrap();
 
         let buffer = terminal.backend().buffer();
 
