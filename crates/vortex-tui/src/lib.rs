@@ -2,10 +2,11 @@ mod action;
 mod app;
 mod terminal;
 mod ui;
+mod widgets;
 
 pub mod options;
 
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use std::io;
 use std::io::Error;
 
@@ -28,7 +29,13 @@ pub fn run(_tui_potions: TuiOptions) -> Result<(), Error> {
 
 fn map_event(event: Event) -> Option<UiAction> {
     match event {
-        Event::Key(key) if key.code == KeyCode::Char('q') => Some(UiAction::Quit),
+        Event::Key(key)
+            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            Some(UiAction::Quit)
+        }
+        Event::Key(key) if key.code == KeyCode::Enter => None,
+        Event::Key(key) => Some(UiAction::EditPrompt(key.into())),
         _ => None,
     }
 }
