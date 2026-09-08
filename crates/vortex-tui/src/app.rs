@@ -1,11 +1,12 @@
 use crate::action::UiAction;
-use crate::widgets::PromptEditor;
+use crate::widgets::{PromptEditor, Transcript};
 
 #[derive(Debug)]
 pub(crate) struct AppState {
     exit_requested: bool,
     status_line: String,
     prompt_editor: PromptEditor,
+    transcript: Transcript,
 }
 
 impl Default for AppState {
@@ -14,6 +15,7 @@ impl Default for AppState {
             exit_requested: false,
             status_line: "Status: Running".to_string(),
             prompt_editor: PromptEditor::default(),
+            transcript: Transcript::default(),
         }
     }
 }
@@ -30,6 +32,10 @@ impl AppState {
     pub(crate) fn prompt_editor(&self) -> &PromptEditor {
         &self.prompt_editor
     }
+
+    pub(crate) fn transcript(&self) -> &Transcript {
+        &self.transcript
+    }
 }
 
 pub(crate) fn update(state: &mut AppState, action: UiAction) {
@@ -39,6 +45,13 @@ pub(crate) fn update(state: &mut AppState, action: UiAction) {
         }
         UiAction::EditPrompt(input) => {
             state.prompt_editor.handle_input(input);
+        }
+        UiAction::SubmitPrompt => {
+            let content = state.prompt_editor.take_text();
+
+            if !content.trim().is_empty() {
+                state.transcript.push_user(content);
+            }
         }
     }
 }

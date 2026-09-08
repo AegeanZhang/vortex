@@ -28,9 +28,7 @@ pub(crate) fn render(frame: &mut Frame<'_>, state: &AppState) {
     let header = Paragraph::new("Rust TUI Demo").block(Block::default().borders(Borders::ALL));
     frame.render_widget(header, header_area);
 
-    let main = Paragraph::new("Press 'Ctrl-C' to quit.\n\nTry resizing the terminal window.")
-        .block(Block::default().borders(Borders::ALL));
-    frame.render_widget(main, main_area);
+    state.transcript().render(frame, main_area);
 
     let status = Paragraph::new(state.status_line());
     frame.render_widget(status, status_area);

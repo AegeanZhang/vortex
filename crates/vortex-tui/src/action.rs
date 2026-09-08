@@ -4,4 +4,5 @@ use crate::widgets::PromptInput;
 pub(crate) enum UiAction {
     Quit,
     EditPrompt(PromptInput),
+    SubmitPrompt,
 }

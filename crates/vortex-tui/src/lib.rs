@@ -34,7 +34,7 @@ fn map_event(event: Event) -> Option<UiAction> {
         {
             Some(UiAction::Quit)
         }
-        Event::Key(key) if key.code == KeyCode::Enter => None,
+        Event::Key(key) if key.code == KeyCode::Enter => Some(UiAction::SubmitPrompt),
         Event::Key(key) => Some(UiAction::EditPrompt(key.into())),
         _ => None,
     }
