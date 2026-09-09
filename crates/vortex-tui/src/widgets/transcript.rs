@@ -24,6 +24,12 @@ impl Transcript {
         });
     }
 
+    pub(crate) fn start_assistant(&mut self) {}
+
+    pub(crate) fn append_assistant_delta(&mut self, delta: String) {}
+
+    pub(crate) fn push_error(&mut self, message: String) {}
+
     pub(crate) fn render(&self, frame: &mut Frame<'_>, area: Rect) {
         let mut lines = Vec::new();
 

@@ -20,21 +20,20 @@ struct ChatRequest {
 
 #[derive(Debug, Deserialize)]
 struct ResponseMessage {
-    content: Option<String>
+    content: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Choice {
-    message: ResponseMessage
+    message: ResponseMessage,
 }
 
 #[derive(Debug, Deserialize)]
 struct ChatResponse {
-    choices: Vec<Choice>
+    choices: Vec<Choice>,
 }
 
 pub async fn execute(task: String) -> Result<(), Box<dyn Error + Send + Sync>> {
-
     let api_key = var("DEEPSEEK_API_KEY")?;
 
     let client = Client::new();
@@ -50,12 +49,13 @@ pub async fn execute(task: String) -> Result<(), Box<dyn Error + Send + Sync>> {
             Message {
                 role: "user".to_string(),
                 content: task,
-            }
+            },
         ],
-        stream: false
+        stream: false,
     };
 
-    let response = client.post("https://api.deepseek.com/chat/completions")
+    let response = client
+        .post("https://api.deepseek.com/chat/completions")
         .bearer_auth(api_key)
         .json(&request)
         .send()

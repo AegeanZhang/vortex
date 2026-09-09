@@ -12,5 +12,6 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace.dependencies]
+vortex-core = { path = "crates/vortex-core" }
 vortex-provider = { path = "crates/vortex-provider" }
 vortex-tui = { path = "crates/vortex-tui" }

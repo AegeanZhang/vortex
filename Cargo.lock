@@ -309,6 +309,7 @@ dependencies = [
  "crossterm_winapi",
  "derive_more",
  "document-features",
+ "futures-core",
  "mio",
  "parking_lot",
  "rustix",
@@ -2107,6 +2108,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "vortex-core",
  "vortex-provider",
  "vortex-tui",
 ]
@@ -2114,6 +2116,9 @@ dependencies = [
 [[package]]
 name = "vortex-core"
 version = "0.1.0"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "vortex-provider"
@@ -2132,8 +2137,11 @@ name = "vortex-tui"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "futures-util",
  "ratatui",
  "ratatui-textarea",
+ "tokio",
+ "vortex-core",
 ]
 
 [[package]]

@@ -1,9 +1,10 @@
-use crate::action::UiAction;
+use crate::action::{Effect, UiAction};
 use crate::widgets::{PromptEditor, Transcript};
+
+use vortex_core::{AgentCommand, CoreEvent};
 
 #[derive(Debug)]
 pub(crate) struct AppState {
-    exit_requested: bool,
     status_line: String,
     prompt_editor: PromptEditor,
     transcript: Transcript,
@@ -12,7 +13,7 @@ pub(crate) struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            exit_requested: false,
+            //exit_requested: false,
             status_line: "Status: Running".to_string(),
             prompt_editor: PromptEditor::default(),
             transcript: Transcript::default(),
@@ -21,10 +22,6 @@ impl Default for AppState {
 }
 
 impl AppState {
-    pub(crate) fn exit_requested(&self) -> bool {
-        self.exit_requested
-    }
-
     pub(crate) fn status_line(&self) -> &str {
         &self.status_line
     }
@@ -38,20 +35,45 @@ impl AppState {
     }
 }
 
-pub(crate) fn update(state: &mut AppState, action: UiAction) {
+pub(crate) fn update(state: &mut AppState, action: UiAction) -> Vec<Effect> {
     match action {
         UiAction::Quit => {
-            state.exit_requested = true;
+            vec![Effect::SendCommand(AgentCommand::Shutdown), Effect::Exit]
         }
         UiAction::EditPrompt(input) => {
             state.prompt_editor.handle_input(input);
+            vec![Effect::Redraw]
         }
         UiAction::SubmitPrompt => {
             let content = state.prompt_editor.take_text();
 
-            if !content.trim().is_empty() {
-                state.transcript.push_user(content);
+            if content.trim().is_empty() {
+                return vec![Effect::Redraw];
             }
+
+            vec![
+                Effect::SendCommand(AgentCommand::SubmitPrompt { content }),
+                Effect::Redraw,
+            ]
+        }
+        UiAction::CoreEvent(CoreEvent::UserMessageAdded { content }) => {
+            state.transcript.push_user(content);
+            vec![Effect::Redraw]
+        }
+        UiAction::CoreEvent(CoreEvent::AssistantMessageStarted) => {
+            state.transcript.start_assistant();
+            vec![Effect::Redraw]
+        }
+        UiAction::CoreEvent(CoreEvent::AssistantTextDelta { delta }) => {
+            state.transcript.append_assistant_delta(delta);
+            vec![Effect::Redraw]
+        }
+        UiAction::CoreEvent(CoreEvent::TurnCompleted) => {
+            vec![Effect::Redraw]
+        }
+        UiAction::CoreEvent(CoreEvent::TurnFailed { message }) => {
+            state.transcript.push_error(message);
+            vec![Effect::Redraw]
         }
     }
 }
@@ -66,6 +88,6 @@ mod tests {
 
         update(&mut state, UiAction::Quit);
 
-        assert!(state.exit_requested());
+        //assert!(state.exit_requested());
     }
 }

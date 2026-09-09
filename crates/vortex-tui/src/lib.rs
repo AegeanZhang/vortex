@@ -1,33 +1,38 @@
 mod action;
 mod app;
+mod error;
+mod event_loop;
 mod terminal;
 mod ui;
 mod widgets;
 
 pub mod options;
 
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
-use std::io;
-use std::io::Error;
+use crossterm::event::{Event, KeyCode, KeyModifiers};
 
-use crate::action::UiAction;
-use crate::app::{AppState, update};
-use crate::options::TuiOptions;
-use crate::terminal::{TuiTerminal, enter};
+use crate::{action::UiAction, options::TuiOptions, terminal::enter};
 
-use crate::ui::render;
+use vortex_core::SessionConnection;
 
-pub fn run(_tui_potions: TuiOptions) -> Result<(), Error> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TuiOutcome {
+    UserExit,
+}
+
+pub async fn run(
+    connection: SessionConnection,
+    _tui_potions: TuiOptions,
+) -> Result<TuiOutcome, error::TuiError> {
     let (mut terminal, mut guard) = enter()?;
 
-    run_app(&mut terminal)?;
+    let outcome = event_loop::run_event_loop(&mut terminal, connection).await?;
 
     guard.cleanup()?;
 
-    Ok(())
+    Ok(outcome)
 }
 
-fn map_event(event: Event) -> Option<UiAction> {
+pub(crate) fn map_event(event: Event) -> Option<UiAction> {
     match event {
         Event::Key(key)
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) =>
@@ -38,18 +43,4 @@ fn map_event(event: Event) -> Option<UiAction> {
         Event::Key(key) => Some(UiAction::EditPrompt(key.into())),
         _ => None,
     }
-}
-
-fn run_app(terminal: &mut TuiTerminal) -> io::Result<()> {
-    let mut state = AppState::default();
-
-    while !state.exit_requested() {
-        terminal.draw(|frame| render(frame, &state))?;
-
-        if let Some(action) = map_event(event::read()?) {
-            update(&mut state, action);
-        }
-    }
-
-    Ok(())
 }

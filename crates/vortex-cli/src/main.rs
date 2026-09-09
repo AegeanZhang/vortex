@@ -1,11 +1,13 @@
 mod exec;
 
-use std::error::Error;
-use exec::execute;
 use clap::{Parser, Subcommand};
+use exec::execute;
+use std::error::Error;
 
-use vortex_tui::run;
 use vortex_tui::options::TuiOptions;
+use vortex_tui::run;
+
+use vortex_core::start_session;
 
 #[derive(Parser, Debug)]
 #[command(name = "vortex", version, about = "A simple CLI Agent", long_about = None)]
@@ -30,7 +32,7 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() ->Result<(), Box<dyn Error + Send + Sync>> {
+async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -38,8 +40,9 @@ async fn main() ->Result<(), Box<dyn Error + Send + Sync>> {
             execute(prompt).await?;
         }
         None => {
+            let connection = start_session();
             let tui_options = TuiOptions { color: None };
-            run(tui_options)?;
+            run(connection, tui_options).await?;
         }
     }
 
