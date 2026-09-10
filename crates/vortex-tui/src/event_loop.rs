@@ -46,10 +46,12 @@ pub(crate) async fn run_event_loop(
     connection: SessionConnection,
 ) -> Result<TuiOutcome, TuiError> {
     let SessionConnection {
-        agent, mut events, ..
+        snapshot,
+        agent,
+        mut events,
     } = connection;
 
-    let mut state = AppState::default();
+    let mut state = AppState::from(snapshot);
     let mut terminal_events = EventStream::new();
     let mut redraw = true;
 

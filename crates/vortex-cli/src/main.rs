@@ -2,12 +2,12 @@ mod exec;
 
 use clap::{Parser, Subcommand};
 use exec::execute;
-use std::error::Error;
-
-use vortex_tui::options::TuiOptions;
-use vortex_tui::run;
+use std::{env, error::Error, sync::Arc};
 
 use vortex_core::start_session;
+use vortex_provider::OpenAiChatProvider;
+use vortex_tui::options::TuiOptions;
+use vortex_tui::run;
 
 #[derive(Parser, Debug)]
 #[command(name = "vortex", version, about = "A simple CLI Agent", long_about = None)]
@@ -40,8 +40,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             execute(prompt).await?;
         }
         None => {
-            let connection = start_session();
+            let api_key = env::var("DEEPSEEK_API_KEY")?;
+
+            let provider = Arc::new(OpenAiChatProvider::new(
+                "https://api.deepseek.com",
+                "deepseek-v4-pro",
+                api_key,
+            ));
+
+            let connection = start_session(provider);
             let tui_options = TuiOptions { color: None };
+
             run(connection, tui_options).await?;
         }
     }

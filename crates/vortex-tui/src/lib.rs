@@ -8,6 +8,8 @@ mod widgets;
 
 pub mod options;
 
+pub use error::TuiError;
+
 use crossterm::event::{Event, KeyCode, KeyModifiers};
 
 use crate::{action::UiAction, options::TuiOptions, terminal::enter};
@@ -21,8 +23,8 @@ pub enum TuiOutcome {
 
 pub async fn run(
     connection: SessionConnection,
-    _tui_potions: TuiOptions,
-) -> Result<TuiOutcome, error::TuiError> {
+    _tui_options: TuiOptions,
+) -> Result<TuiOutcome, TuiError> {
     let (mut terminal, mut guard) = enter()?;
 
     let outcome = event_loop::run_event_loop(&mut terminal, connection).await?;

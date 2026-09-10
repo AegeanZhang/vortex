@@ -9,7 +9,7 @@ pub(crate) enum UiAction {
     CoreEvent(CoreEvent),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Effect {
     SendCommand(AgentCommand),
     Redraw,

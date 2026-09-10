@@ -2123,6 +2123,11 @@ dependencies = [
 [[package]]
 name = "vortex-provider"
 version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "vortex-core",
+]
 
 [[package]]
 name = "vortex-sandbox"

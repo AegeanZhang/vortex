@@ -15,3 +15,6 @@ edition = "2024"
 vortex-core = { path = "crates/vortex-core" }
 vortex-provider = { path = "crates/vortex-provider" }
 vortex-tui = { path = "crates/vortex-tui" }
+
+reqwest = { version = "0.13.4", features = ["json", "stream"] }
+serde = { version = "1.0.229", features = ["derive"] }
