@@ -2,7 +2,9 @@
 
 Vortex 是一个计划使用 Rust 编写的通用终端 Agent，目标体验类似 Codex CLI 和 Claude Code：理解自然语言任务，在用户控制下读取工作区、调用工具、执行命令并持续完成任务。
 
-> 当前状态：设计阶段 + 技术预研。Cargo workspace 已建立，但其中只有 `playground/` 下的学习实验，产品 crate（CLI/TUI、Agent 核心、Provider、工具与沙箱）尚未开始实现。
+> 当前状态：非流式 TUI v1 已跑通。CLI 可装配 OpenAI-compatible Provider，Core Session
+> 可接受 Prompt、维护消息历史并发布事件，TUI 可编辑输入、提交请求和展示回复。工具调用、
+> 真正流式输出、会话恢复、模型切换和沙箱尚未实现。
 
 ## 首版方向
 
@@ -28,6 +30,13 @@ docs/                      # 文档，分类索引见 docs/README.md
 ├── engineering/           # 编码、测试、Git 与 Review 规范
 ├── research/              # 技术调研
 └── guide/                 # 用户手册
+crates/                    # 产品 crate
+├── vortex-cli/            # 二进制入口与依赖装配
+├── vortex-core/           # Session runtime、语义命令与事件
+├── vortex-provider/       # OpenAI-compatible Provider 适配
+├── vortex-tui/            # 交互界面、状态更新与渲染
+├── vortex-tools/          # 工具层占位 crate
+└── vortex-sandbox/        # 沙箱层占位 crate
 playground/                # 学习与验证用实验，不属于产品代码
 ├── hello-rust/            # Rust 入门练习
 └── tui-demo/              # ratatui + crossterm 终端界面实验
@@ -42,18 +51,22 @@ playground/                # 学习与验证用实验，不属于产品代码
 
 ## 常用命令
 
-当前 workspace 内只有实验 crate，以下命令可用于检查它们：
+以下命令检查完整 workspace，并运行当前产品 TUI：
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
-cargo run -p tui-demo          # 运行 TUI 实验，按 q 退出
+DEEPSEEK_API_KEY=<key> cargo run -p vortex-cli  # 运行产品 TUI，Ctrl+C 退出
+cargo run -p tui-demo                        # 运行 TUI 实验，按 q 退出
 ```
+
+产品不会主动读取 `.env`；本地开发脚本如需加载它，应先把变量导出到进程环境。当前 Provider
+地址和模型仍由 CLI 固定装配，尚未接入 TOML 配置。
 
 ## Roadmap
 
-1. 初始化 Rust 2024 Cargo workspace，定义 Agent、Provider、Tool 和事件接口。（workspace 已建立，接口定义待开始）
-2. 实现模型流式响应、工具循环、内置工具及自动化测试。
-3. 加入 TUI、JSONL 会话恢复、`bubblewrap` 沙箱和 stdio MCP client。
+1. 初始化 Rust 2024 Cargo workspace，完成 Provider 抽象、Session 事件接口和非流式 TUI v1。（已完成）
+2. 补齐当前 Core、Provider 与 TUI 的单元测试，再实现模型流式响应和取消。
+3. 实现工具循环、内置工具、JSONL 会话恢复、`bubblewrap` 沙箱和 stdio MCP client。
 4. 完善安装、CI、发布包、可观测性与跨平台抽象。

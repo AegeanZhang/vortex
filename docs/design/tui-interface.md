@@ -1,20 +1,22 @@
 # TUI 接口设计
 
-本文档定义 `vortex-tui` 与 CLI、Agent core 之间的接口和状态边界。技术选型及外部实现对照见 [`../research/rust-tui-research.md`](../research/rust-tui-research.md)，命令行模式见 [`cli-surface.md`](cli-surface.md)。
+本文档以当前非流式 v1 为基线，说明 `vortex-tui` 如何消费
+`vortex-core::SessionConnection`。Session actor 和 Provider 调用链见
+[`session-runtime.md`](session-runtime.md)，技术选型见
+[`../research/rust-tui-research.md`](../research/rust-tui-research.md)。
 
-## 目标与边界
+## 职责边界
 
-`vortex-tui` 是由 `vortex-cli` 启动的 library crate，负责终端生命周期、输入映射、界面状态和渲染。它依赖 `vortex-core` 的语义类型，但不直接持有 Provider、Tool、配置加载器或会话存储实现。
+`vortex-tui` 是由 `vortex-cli` 启动的 library crate，负责终端生命周期、输入映射、
+界面状态和渲染。它依赖 Core 的语义类型，但不持有具体 Provider，不构造模型请求，也不
+保存权威会话历史。
 
-- CLI 负责读取配置、装配具体实现、创建或恢复 Session，再启动 TUI。
-- Core 负责 Agent loop、对话事实、当前模型、审批和任务状态。
-- TUI 只保存输入框、光标、滚动、焦点、弹窗等展示状态。
-- Ratatui、Crossterm 及控件类型不得出现在 `vortex-core` 的公共接口中。
-- 非 TTY 和 `vortex exec` 不进入 TUI，继续使用 Core 的同一事件流生成纯文本或 JSONL 输出。
+- CLI 读取环境变量、装配 Provider、启动 Session，再把连接交给 TUI。
+- Core 保存对话事实、执行 Turn 并发布 `CoreEvent`。
+- TUI 保存 Prompt、Transcript、notice 和用于展示的 Session 状态。
+- Ratatui、Crossterm 和 `ratatui-textarea` 类型不得进入 `vortex-core`。
 
-## 公共入口
-
-`vortex-tui` 对外保持一个主入口：
+当前入口为：
 
 ```rust
 pub async fn run(
@@ -23,124 +25,108 @@ pub async fn run(
 ) -> Result<TuiOutcome, TuiError>;
 ```
 
-`TuiOptions` 只包含颜色、全屏模式等 UI 偏好，不重复保存模型、Provider 或权限配置。`TuiOutcome` 表示用户退出或信号中断等正常终态；终端初始化、绘制及事件通道异常通过结构化 `TuiError` 返回，最终由 CLI 转换为中文提示和退出码。
+`TuiOutcome::UserExit` 是当前唯一正常终态。`TuiOptions::color` 已预留但尚未生效。
+终端 I/O、Session channel 和事件流关闭通过 `TuiError` 返回；TUI 不调用
+`process::exit`。
 
-`run` 内部拥有终端，从进入 raw mode 到恢复终端形成完整生命周期。调用方不应操作 Ratatui `Terminal`，TUI 也不调用 `process::exit`。
-
-## Core 连接契约
-
-`SessionConnection` 属于 `vortex-core`，由 Core 在启动 Agent runtime 时创建：
-
-```rust
-pub struct SessionConnection {
-    pub snapshot: SessionSnapshot,
-    pub agent: AgentHandle,
-    pub events: CoreEventStream,
-}
-```
-
-- `SessionSnapshot` 提供订阅建立时的一致状态，包括历史投影、当前模型、模型目录和任务状态。
-- `AgentHandle` 是可克隆的命令入口，隐藏 Tokio channel 的具体类型。
-- `CoreEventStream` 是当前消费者独占的有界事件流。
-
-Snapshot 与事件订阅必须原子建立，避免读取快照后、开始收事件前丢失状态变化。TUI 不读取 JSONL 文件来补齐事件，也不自行调用 Provider 恢复历史。
-
-TUI 可以发送的核心命令至少包括：
-
-```rust
-pub enum AgentCommand {
-    SubmitPrompt { content: String },
-    CancelTurn,
-    SelectModel { target: ModelTarget },
-    DecideApproval {
-        request_id: ApprovalId,
-        decision: ApprovalDecision,
-    },
-    Shutdown,
-}
-```
-
-Core 通过 `CoreEvent` 返回用户消息、文本增量、工具状态、审批请求、模型切换、任务完成和结构化错误。Provider 的 SSE chunk、HTTP 响应体和 Ratatui/Crossterm 事件都不能成为 `CoreEvent`。
-
-## 单向状态流
-
-TUI 内部遵循单向数据流：
+## 模块与数据流
 
 ```text
-Terminal event / CoreEvent / Tick / Signal
-                    │
-                    v
-                 UiAction
-                    │
-                    v
-             update(AppState)
-                    │
-                    v
-                  Effect
-          ┌─────────┼─────────┐
-          v         v         v
- AgentCommand    Redraw      Exit
+Crossterm Event ──> map_event ─┐
+                               ├─> UiAction ─> update(AppState) ─> Effect
+CoreEventStream ────────────────┘                  │                 │
+                                                   v                 v
+                                              下一次 render     event loop 执行
 ```
 
-核心接口为：
+| 模块 | 当前职责 |
+| --- | --- |
+| `lib.rs` | 公开入口、键盘事件映射和 `TuiOutcome` |
+| `terminal.rs` | 初始化 raw mode/alternate screen，并用 guard 恢复终端 |
+| `event_loop.rs` | 等待终端/Core 事件、调用 reducer、顺序执行 Effect |
+| `app.rs` | `AppState` 和唯一状态修改入口 `update` |
+| `action.rs` | `UiAction` 与 `Effect` |
+| `ui.rs` | 四区布局和只读渲染 |
+| `widgets/` | `PromptEditor` 与 `Transcript` 的局部状态和渲染 |
 
-```rust
-fn update(state: &mut AppState, action: UiAction) -> Vec<Effect>;
+后台任务不能直接修改 UI 或绘制终端。`update` 是同步纯状态转换；发送异步命令和退出循环
+由 event loop 执行。
 
-fn render(frame: &mut Frame<'_>, state: &AppState);
-```
+## 输入、Action 与 Effect
 
-只有 `update` 修改 `AppState`。输入映射把 `KeyEvent` 转成 `UiAction`；渲染函数只读取状态；event loop 负责执行 Effect。后台任务只能发送事件，不直接修改 UI 状态或绘制终端。
+当前按键映射如下：
 
-事件通道必须有界。收到连续文本增量时先更新状态并标记 dirty，在短时间窗口内合并重绘；空闲时不固定高频刷新。用户向上滚动后暂停自动跟随，回到底部时恢复。
+- `Ctrl+C` → `UiAction::Quit`。
+- `Enter` → `UiAction::SubmitPrompt`。
+- 其他 `KeyEvent` → `UiAction::EditPrompt`，交给 `PromptEditor`。
+- 非键盘事件当前忽略。
 
-## `/model` 契约
+提交时，TUI 只生成 `SendCommand(SubmitPrompt)`，不会乐观地把用户文本写入 Transcript。
+显示更新以 Core 随后发送的 `UserMessageAdded` 为准。空输入会清空编辑器但不发送命令；
+`Running` 时提交会保留编辑器内容，并在状态栏显示拒绝原因。
 
-`/model` 是 UI Intent，不是 Provider 调用。无参数时打开选择器，带目标时可以直接请求切换：
+`Effect` 当前只有三种：发送 `AgentCommand`、请求重绘和退出。Effect 按返回顺序执行；退出
+会先发送 `Shutdown`，成功后才结束 event loop。命令 channel 关闭时返回 `TuiError`。
 
-```text
-/model
-/model deepseek/deepseek-v4-pro
-```
+## Core 事件投影
 
-处理顺序固定为：
+| `CoreEvent` | `AppState` 变化 |
+| --- | --- |
+| `UserMessageAdded` | 追加 User Transcript entry |
+| `AssistantMessageStarted` | 状态设为 `Running`，清除 notice，创建空 Assistant entry |
+| `AssistantTextDelta` | 追加到最后一个 Assistant entry；不存在时创建一个 |
+| `TurnCompleted` | 状态设为 `Idle`，清除 notice |
+| `TurnFailed` | 状态设为 `Failed`，清除 notice 并追加 Error entry |
+| `CommandRejected` | 只更新 notice，不改状态和 Transcript |
 
-1. TUI 从 Snapshot 或后续 Core event 中读取模型目录。
-2. 用户选择后，TUI 发送 `AgentCommand::SelectModel`。
-3. Core 校验 Provider、凭据、模型能力和当前 Turn 状态。
-4. 成功时 Core 写入会话事件并发出 `CoreEvent::ModelChanged`；失败时发出结构化拒绝事件。
-5. TUI 仅在收到确认事件后更新当前模型显示，不做乐观切换。
+Turn 失败时，如果最后一项是空 Assistant 占位，`Transcript::fail_assistant` 会先删除它；
+如果已存在部分回复，则保留部分内容并另加 Error entry。Snapshot 转换会恢复 User 和
+Assistant 消息，System 消息当前不显示。
 
-切换默认只影响下一次模型请求，不修改用户级或项目级 TOML。正在流式响应或存在未闭合 Tool call 时，由 Core 明确拒绝或延后切换；TUI 不自行决定。模型切换后的 Token 预算重算、Provider 选择和协议缓存失效也由 Core 与 Provider 层处理。
+## Event loop 与绘制
 
-## 终端与故障处理
+Event loop 使用 `tokio::select!` 等待 `EventStream` 和 `CoreEventStream`。Action 经过
+reducer 产生 Effect，所有 Effect 执行完后再决定退出或重绘。`redraw` 标志会合并同一批
+Effect 中的重复请求，但当前没有定时 tick 或跨事件的刷新窗口。
 
-- 使用 RAII guard 管理 raw mode、alternate screen、光标和鼠标捕获，正常返回、错误及 panic 路径都必须恢复终端。
-- TUI 运行期间禁止 `println!` 和直接写 stdout；终端绘制使用 stderr，诊断信息交给 `tracing`。
-- 第一次 `Ctrl+C` 在任务运行时发送 `CancelTurn`；空闲时触发退出。取消应由 Core 继续传播到 Provider、工具和子进程。
-- Agent 的单次任务失败通常显示在会话中，不结束 TUI；终端故障或 Core 通道意外关闭才结束 `run`。
-- 渲染模型和工具文本前过滤控制字符，不把未经处理的 ANSI escape sequence 写入终端。
+页面固定分为 header、transcript、status 和 prompt 四区。Transcript 使用
+`Paragraph` 换行渲染；空会话显示输入提示。当前没有滚动、Markdown、resize 专用状态或
+窄窗口降级布局。
 
-## 内部模块建议
+`TerminalGuard` 从 raw mode 开启后立即接管清理。正常退出显式调用 `cleanup`；初始化后
+发生错误或 unwind 时由 `Drop` 尽力关闭 raw mode、离开 alternate screen 并显示光标。
+TUI 运行期间不得使用 `println!` 破坏屏幕。
 
-```text
-vortex-tui/src/
-├── lib.rs          # run 与公开类型
-├── app.rs          # AppState 与 update
-├── action.rs       # UiAction 与 Effect
-├── event_loop.rs   # Tokio select 与 Effect 执行
-├── input.rs        # 终端输入映射
-├── terminal.rs     # TerminalGuard 与恢复
-├── ui.rs           # 页面布局和纯渲染
-└── widgets/        # transcript、prompt、model picker
-```
+## 单元测试矩阵
 
-模块应在对应职责出现时再建立。首版先完成 transcript、单行输入、取消和文本流；审批弹窗、`/model`、Markdown 与多行编辑器随后按真实需求加入。
+通用规范见 [`../engineering/testing.md`](../engineering/testing.md)。优先测试 reducer 和
+widget 的确定性状态，不通过真实键盘或真实 Provider 制造条件。
 
-## 测试要求
+| 模块与位置 | 场景 | 关键断言 |
+| --- | --- | --- |
+| `app.rs` | Quit | `Shutdown` 位于 `Exit` 之前 |
+| 同上 | 空输入、正常提交、Running 时提交 | 是否保留输入、发送命令和设置 notice 均正确 |
+| 同上 | 每一种 `CoreEvent` | status、notice、Transcript 与 Redraw 一致 |
+| `widgets/transcript.rs` | 多段 delta | 内容追加到同一 Assistant entry |
+| 同上 | 失败前无内容/已有部分内容 | 分别删除空占位/保留部分回复，并追加 Error |
+| 同上 | Snapshot 投影 | User/Assistant 保留，System 隐藏，顺序不变 |
+| `ui.rs` | 标准布局与基本边框 | `TestBackend` 中四区位置正确 |
+| 同上 | 空会话、消息、notice、窄窗口 | 关键文本可见且渲染不 panic |
+| `event_loop.rs` | Effect 执行 | 命令发送、Redraw/Exit 聚合及 channel 错误正确 |
+| `lib.rs` | 输入映射 | `Ctrl+C`、Enter、普通键和非键盘事件映射正确 |
 
-- reducer 单元测试覆盖输入、提交、滚动、取消、Core event 投影和模型切换确认。
-- Ratatui `TestBackend` 覆盖常规、窄窗口和 resize 后的关键布局。
-- 使用 fake `SessionConnection` 测试命令发送、事件顺序、通道关闭和背压，不调用真实 Provider。
-- PTY 集成测试覆盖正常退出、`Ctrl+C`、错误和 panic 后的终端恢复。
-- `/model` 测试必须确认请求发出后不会提前更新状态，只有 `ModelChanged` 才使选择生效。
+终端恢复还需要人工或 PTY 集成测试，不能由 `TestBackend` 证明。event loop 测试应使用
+fake Session/channel，禁止访问真实模型服务。
+
+## 后续设计
+
+以下能力尚未实现，不能作为当前代码的既有契约：
+
+- `/model` 与 `AgentCommand::SelectModel`；模型只能在 Core 确认后更新显示。
+- `CancelTurn`；未来 `Ctrl+C` 在 Running 时应先取消，Idle 时才退出。
+- 真正流式 Provider、跨事件重绘节流和 Transcript 自动跟随/手动滚动。
+- 工具状态、审批弹窗、Markdown、多行提交策略和会话恢复。
+- 模型文本的终端控制字符过滤。
+
+这些能力应先扩展 Core 的语义命令或事件，再投影到 TUI；不得把 Provider wire 类型或
+Ratatui 控件作为跨 crate 接口。

@@ -1,7 +1,8 @@
 # 上手指南
 
-本文只描述**当前真实可运行**的内容。产品命令尚未实现，其目标形态见
-[`../design/cli-surface.md`](../design/cli-surface.md)，不要把设计文档里的命令当成现在能用的。
+本文只描述**当前真实可运行**的内容。产品 TUI 已有非流式 v1；其他命令和后续能力的
+目标形态见 [`../design/cli-surface.md`](../design/cli-surface.md)，不要把设计文档中的
+未实现部分当成现有功能。
 
 ## 环境要求
 
@@ -50,8 +51,18 @@ cargo run -p tui-demo
 
 ## 产品命令的当前状态
 
-`cargo build` 会产出 `target/debug/vortex` 二进制，但它**尚未实现任何产品命令**——
-既不能执行任务，也没有 TUI 和会话恢复。
+启动产品 TUI 前，把 DeepSeek API key 导出到当前进程环境：
+
+```bash
+DEEPSEEK_API_KEY=<key> cargo run -p vortex-cli
+```
+
+产品本身不读取 `.env`。进入 TUI 后可输入 Prompt 并按 Enter 提交；当前等待完整模型回复后
+一次显示结果，按 `Ctrl+C` 退出。Provider URL 与模型暂由 CLI 固定装配。
+
+当前尚未实现真正流式输出、工具调用、会话恢复、`/model`、Turn 取消和沙箱。已实现代码的
+设计入口是 [`../design/session-runtime.md`](../design/session-runtime.md) 和
+[`../design/tui-interface.md`](../design/tui-interface.md)。
 
 计划中的命令与参数（`vortex exec`、`vortex resume`、审批与沙箱参数、输出契约、退出码）
 全部记录在 [`../design/cli-surface.md`](../design/cli-surface.md)。该文档描述的是目标形态，
