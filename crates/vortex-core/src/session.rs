@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tracing::info;
 
 use crate::{ModelProvider, ModelRequest, ProviderError};
 
@@ -92,6 +93,8 @@ impl CoreEventStream {
 }
 
 pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
+    info!("Session runtime starting");
+
     let (command_sender, mut command_receiver) = tokio::sync::mpsc::channel::<AgentCommand>(32);
     let (event_sender, event_receiver) = tokio::sync::mpsc::channel::<CoreEvent>(128);
 

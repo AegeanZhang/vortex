@@ -135,8 +135,10 @@ mod tests {
 
     #[test]
     fn turn_completed_changes_status_to_idle() {
-        let mut state = AppState::default();
-        state.status = SessionStatus::Running;
+        let mut state = AppState {
+            status: SessionStatus::Running,
+            ..Default::default()
+        };
 
         let effects = update(&mut state, UiAction::CoreEvent(CoreEvent::TurnCompleted));
 
@@ -146,8 +148,10 @@ mod tests {
 
     #[test]
     fn command_rejection_keeps_current_status() {
-        let mut state = AppState::default();
-        state.status = SessionStatus::Running;
+        let mut state = AppState {
+            status: SessionStatus::Running,
+            ..Default::default()
+        };
 
         let effects = update(
             &mut state,

@@ -1,4 +1,5 @@
 mod exec;
+mod logging;
 
 use clap::{Parser, Subcommand};
 use exec::execute;
@@ -34,6 +35,20 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let cli = Cli::parse();
+
+    let run_mode = match &cli.command {
+        Some(Commands::Exec { .. }) => logging::RunMode::Exec,
+        None => logging::RunMode::Tui,
+    };
+
+    let logging_guard = logging::init(run_mode, u8::from(cli.verbose), false)?;
+
+    tracing::info!(
+        mode = run_mode.as_str(),
+        version = env!("CARGO_PKG_VERSION"),
+        log_path = %logging_guard.path().display(),
+        "vortex started",
+    );
 
     match cli.command {
         Some(Commands::Exec { prompt }) => {

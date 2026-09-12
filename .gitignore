@@ -27,4 +27,5 @@ lcov.info
 *.swo
 
 # 日志
+.vortex/logs/
 *.log

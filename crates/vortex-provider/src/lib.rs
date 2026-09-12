@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tracing::{debug, trace};
 use vortex_core::{MessageRole, ModelProvider, ModelRequest, ProviderError, ProviderFuture};
 
 pub struct OpenAiChatProvider {
@@ -81,6 +82,18 @@ impl ModelProvider for OpenAiChatProvider {
                 messages,
                 stream: false,
             };
+
+            debug!(
+                model = %request.model,
+                messages_count = request.messages.len(),
+                stream = request.stream,
+                "provider request build"
+            );
+
+            trace!(
+                request = ?request,
+                "provider request body",
+            );
 
             let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'),);
 
