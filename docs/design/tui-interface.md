@@ -52,6 +52,10 @@ CoreEventStream ────────────────┘             
 后台任务不能直接修改 UI 或绘制终端。`update` 是同步纯状态转换；发送异步命令和退出循环
 由 event loop 执行。
 
+当前模块只按已经出现的职责拆分，不建立通用 `Component`、`Screen`、router 或内部
+event bus。等第二个页面、焦点切换或真正可复用的控件出现后，再从重复行为中提取抽象，
+避免隐藏现有的单向控制流。
+
 ## 输入、Action 与 Effect
 
 当前按键映射如下：
@@ -67,6 +71,19 @@ CoreEventStream ────────────────┘             
 
 `Effect` 当前只有三种：发送 `AgentCommand`、请求重绘和退出。Effect 按返回顺序执行；退出
 会先发送 `Shutdown`，成功后才结束 event loop。命令 channel 关闭时返回 `TuiError`。
+
+## PromptEditor 边界
+
+`PromptEditor` 是项目对 `ratatui-textarea::TextArea<'static>` 的薄封装。`PromptInput`
+包装第三方 `Input`，使 `action.rs` 和 `AppState` 不需要了解 TextArea API；组件不暴露
+`textarea()` 或可变 getter。使用 `'static` 避免把控件的生命周期传播到整个 AppState。
+
+Enter 在全局映射阶段转换为 `SubmitPrompt`，`PromptEditor::handle_input` 也拒绝 Enter，
+防止它意外插入换行。`take_text()` 使用 `std::mem::take` 取出文本，并以默认编辑器替换旧
+实例，因此内容、光标、选择和 undo history 会一起重置，同时恢复边框与 placeholder。
+
+当前 Prompt 区高度固定为 3，只支持 Enter 提交的单行交互。以后增加多行输入时，需要同时
+确定插入换行的组合键和输入区高度策略，不能只放开 TextArea 的 Enter。
 
 ## Core 事件投影
 
@@ -110,6 +127,7 @@ widget 的确定性状态，不通过真实键盘或真实 Provider 制造条件
 | `widgets/transcript.rs` | 多段 delta | 内容追加到同一 Assistant entry |
 | 同上 | 失败前无内容/已有部分内容 | 分别删除空占位/保留部分回复，并追加 Error |
 | 同上 | Snapshot 投影 | User/Assistant 保留，System 隐藏，顺序不变 |
+| `widgets/prompt_editor.rs` | 普通输入、Backspace、Enter、提交重置 | `q` 等字符可输入，Enter 不新增行，取值后编辑状态恢复默认 |
 | `ui.rs` | 标准布局与基本边框 | `TestBackend` 中四区位置正确 |
 | 同上 | 空会话、消息、notice、窄窗口 | 关键文本可见且渲染不 panic |
 | `event_loop.rs` | Effect 执行 | 命令发送、Redraw/Exit 聚合及 channel 错误正确 |

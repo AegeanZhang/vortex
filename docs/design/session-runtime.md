@@ -87,9 +87,10 @@ OpenAI-compatible Chat Completions 的 `user`、`assistant`、`system`，发送
 | 模块与位置 | 场景 | 关键断言 |
 | --- | --- | --- |
 | `vortex-core/src/session.rs` | 成功 Turn | 四个事件顺序固定，请求包含用户消息 |
+| 同上 | 连续两个成功 Turn | 第二次请求包含此前 User/Assistant 和本轮 User，顺序不变 |
 | 同上 | 空白 Prompt | 只收到 `CommandRejected`，Provider 未调用 |
 | 同上 | Turn 运行中再次提交 | 第二条命令被拒绝，第一条仍可完成 |
-| 同上 | Provider 返回错误 | 收到 `TurnFailed`，随后可再次提交 |
+| 同上 | Provider 返回错误后重试 | 收到 `TurnFailed`；失败 User 保留、无失败 Assistant，随后可再次提交 |
 | 同上 | `Shutdown` | 受控 Provider task 被中止，事件流最终关闭 |
 | `vortex-provider/src/lib.rs` | 三种角色映射 | 请求 JSON 的 role 与 content 正确，`stream` 为 false |
 | 同上 | HTTP 与响应异常 | 状态码、坏 JSON、空 choices、空 content 分别映射正确 |

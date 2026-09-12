@@ -64,6 +64,15 @@ DEEPSEEK_API_KEY=<key> cargo run -p vortex-cli
 设计入口是 [`../design/session-runtime.md`](../design/session-runtime.md) 和
 [`../design/tui-interface.md`](../design/tui-interface.md)。
 
+手动验收时依次确认：
+
+1. 初始状态栏显示 `Idle`。
+2. 提交非空 Prompt 后出现 `You`，随后状态变为 `Running`。
+3. 完整模型回复显示为 `Assistant`，状态回到 `Idle`。
+4. Provider 错误显示为 `Error`，但 TUI 不退出。
+5. 请求期间按 `Ctrl+C` 能结束 Session，并恢复原始终端。
+6. 日志与错误信息中没有 API key 原文。
+
 计划中的命令与参数（`vortex exec`、`vortex resume`、审批与沙箱参数、输出契约、退出码）
 全部记录在 [`../design/cli-surface.md`](../design/cli-surface.md)。该文档描述的是目标形态，
 实现按其中的阶段表推进；本手册会随实现逐步补充，只写已经跑通的部分。
