@@ -12,7 +12,11 @@ pub use error::TuiError;
 
 use crossterm::event::{Event, KeyCode, KeyModifiers};
 
-use crate::{action::UiAction, options::TuiOptions, terminal::enter};
+use crate::{
+    action::{ScrollCommand, UiAction},
+    options::TuiOptions,
+    terminal::enter,
+};
 
 use vortex_core::SessionConnection;
 
@@ -36,6 +40,22 @@ pub async fn run(
 
 pub(crate) fn map_event(event: Event) -> Option<UiAction> {
     match event {
+        Event::Key(key) if key.code == KeyCode::PageUp => {
+            Some(UiAction::ScrollTranscript(ScrollCommand::PageUp))
+        }
+        Event::Key(key) if key.code == KeyCode::PageDown => {
+            Some(UiAction::ScrollTranscript(ScrollCommand::PageDown))
+        }
+        Event::Key(key)
+            if key.code == KeyCode::Home && key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            Some(UiAction::ScrollTranscript(ScrollCommand::ToTop))
+        }
+        Event::Key(key)
+            if key.code == KeyCode::End && key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            Some(UiAction::ScrollTranscript(ScrollCommand::ToBottom))
+        }
         Event::Key(key)
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) =>
         {

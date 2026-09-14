@@ -1,6 +1,8 @@
 use crate::action::{Effect, UiAction};
 use crate::widgets::{PromptEditor, Transcript};
 
+use crate::action::ScrollCommand;
+
 use vortex_core::{AgentCommand, CoreEvent, SessionSnapshot, SessionStatus};
 
 #[derive(Debug)]
@@ -51,8 +53,8 @@ impl AppState {
         &self.prompt_editor
     }
 
-    pub(crate) fn transcript(&self) -> &Transcript {
-        &self.transcript
+    pub(crate) fn transcript_mut(&mut self) -> &mut Transcript {
+        &mut self.transcript
     }
 }
 
@@ -112,6 +114,16 @@ pub(crate) fn update(state: &mut AppState, action: UiAction) -> Vec<Effect> {
         }
         UiAction::CoreEvent(CoreEvent::CommandRejected { message }) => {
             state.notice = Some(message);
+            vec![Effect::Redraw]
+        }
+        UiAction::ScrollTranscript(command) => {
+            match command {
+                ScrollCommand::PageUp => state.transcript.page_up(),
+                ScrollCommand::PageDown => state.transcript.page_down(),
+                ScrollCommand::ToTop => state.transcript.scroll_to_top(),
+                ScrollCommand::ToBottom => state.transcript.scroll_to_bottom(),
+            }
+
             vec![Effect::Redraw]
         }
     }

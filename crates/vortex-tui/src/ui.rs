@@ -21,14 +21,14 @@ fn sections(area: Rect) -> [Rect; 4] {
     [chunks[0], chunks[1], chunks[2], chunks[3]]
 }
 
-pub(crate) fn render(frame: &mut Frame<'_>, state: &AppState) {
+pub(crate) fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     let [header_area, main_area, status_area, prompt_area] = sections(frame.area());
 
     // 绘制顶部标题栏
     let header = Paragraph::new("Rust TUI Demo").block(Block::default().borders(Borders::ALL));
     frame.render_widget(header, header_area);
 
-    state.transcript().render(frame, main_area);
+    state.transcript_mut().render(frame, main_area);
 
     let status = Paragraph::new(state.status_line());
     frame.render_widget(status, status_area);
@@ -56,9 +56,9 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        let state = AppState::default();
+        let mut state = AppState::default();
 
-        terminal.draw(|frame| render(frame, &state)).unwrap();
+        terminal.draw(|frame| render(frame, &mut state)).unwrap();
 
         let buffer = terminal.backend().buffer();
 

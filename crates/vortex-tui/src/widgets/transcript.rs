@@ -1,8 +1,11 @@
+//! Transcript 展示组件。
+//!
+//! 负责将 Session 消息投影为对话条目，并渲染用户、Assistant 和错误消息。
 use ratatui::{
     Frame,
     layout::Rect,
     text::Line,
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
 };
 
 use vortex_core::{MessageRole, SessionMessage};
@@ -31,9 +34,44 @@ struct TranscriptEntry {
     content: String,
 }
 
+#[derive(Debug)]
+struct TranscriptScroll {
+    offset: usize,
+    follow_tail: bool,
+    content_height: usize,
+    viewport_height: usize,
+}
+
+impl Default for TranscriptScroll {
+    fn default() -> Self {
+        Self {
+            offset: 0,
+            follow_tail: true,
+            content_height: 0,
+            viewport_height: 0,
+        }
+    }
+}
+
+impl TranscriptScroll {
+    fn sync_viewport(&mut self, content_height: usize, viewport_height: usize) {
+        self.content_height = content_height;
+        self.viewport_height = viewport_height;
+
+        let max_offset = content_height.saturating_sub(viewport_height);
+
+        if self.follow_tail {
+            self.offset = max_offset;
+        } else {
+            self.offset = self.offset.min(max_offset);
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Transcript {
     entries: Vec<TranscriptEntry>,
+    scroll: TranscriptScroll,
 }
 
 impl Transcript {
@@ -101,16 +139,19 @@ impl Transcript {
             })
             .collect();
 
-        Self { entries }
+        Self {
+            entries,
+            ..Default::default()
+        }
     }
 
-    pub(crate) fn render(&self, frame: &mut Frame<'_>, area: Rect) {
+    fn render_lines(entries: &[TranscriptEntry]) -> Vec<Line<'_>> {
         let mut lines = Vec::new();
 
-        if self.entries.is_empty() {
+        if entries.is_empty() {
             lines.push(Line::from("Type a prompt and press Enter."));
         } else {
-            for (index, entry) in self.entries.iter().enumerate() {
+            for (index, entry) in entries.iter().enumerate() {
                 if index > 0 {
                     lines.push(Line::default());
                 }
@@ -123,11 +164,89 @@ impl Transcript {
             }
         }
 
-        let transcript = Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("Transcript"))
-            .wrap(Wrap { trim: false });
+        lines
+    }
 
-        frame.render_widget(transcript, area);
+    pub(crate) fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let block = Block::default().borders(Borders::ALL).title("Transcript");
+
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        if inner.width <= 1 || inner.height == 0 {
+            self.scroll.sync_viewport(0, 0);
+            return;
+        }
+
+        let content_area = Rect {
+            width: inner.width.saturating_sub(1),
+            ..inner
+        };
+
+        let lines = Self::render_lines(&self.entries);
+        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+
+        let content_height = paragraph.line_count(content_area.width);
+        let viewport_height = content_area.height as usize;
+
+        self.scroll.sync_viewport(content_height, viewport_height);
+
+        let vertical_offset = u16::try_from(self.scroll.offset).unwrap_or(u16::MAX);
+
+        frame.render_widget(paragraph.scroll((vertical_offset, 0)), content_area);
+
+        if content_height > viewport_height {
+            let mut scrollbar_state = ScrollbarState::new(content_height)
+                .position(self.scroll.offset)
+                .viewport_content_length(viewport_height);
+
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+
+            frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+        }
+    }
+
+    fn max_offset(&self) -> usize {
+        self.scroll
+            .content_height
+            .saturating_sub(self.scroll.viewport_height)
+    }
+
+    fn page_size(&self) -> usize {
+        self.scroll.viewport_height.saturating_sub(1).max(1)
+    }
+
+    pub(crate) fn page_up(&mut self) {
+        let max_offset = self.max_offset();
+
+        if max_offset == 0 {
+            return;
+        }
+
+        self.scroll.offset = self.scroll.offset.saturating_sub(self.page_size());
+        self.scroll.follow_tail = false;
+    }
+
+    pub(crate) fn page_down(&mut self) {
+        let max_offset = self.max_offset();
+
+        self.scroll.offset = self
+            .scroll
+            .offset
+            .saturating_add(self.page_size())
+            .min(max_offset);
+
+        self.scroll.follow_tail = self.scroll.offset == max_offset;
+    }
+
+    pub(crate) fn scroll_to_top(&mut self) {
+        self.scroll.offset = 0;
+        self.scroll.follow_tail = self.max_offset() == 0;
+    }
+
+    pub(crate) fn scroll_to_bottom(&mut self) {
+        self.scroll.offset = self.max_offset();
+        self.scroll.follow_tail = true;
     }
 }
 

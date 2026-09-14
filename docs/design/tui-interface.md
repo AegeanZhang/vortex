@@ -62,8 +62,10 @@ event bus。等第二个页面、焦点切换或真正可复用的控件出现�
 
 - `Ctrl+C` → `UiAction::Quit`。
 - `Enter` → `UiAction::SubmitPrompt`。
+- `PageUp` / `PageDown` → Transcript 向上或向下翻页。
+- `Ctrl+Home` / `Ctrl+End` → Transcript 跳到开头或末尾。
 - 其他 `KeyEvent` → `UiAction::EditPrompt`，交给 `PromptEditor`。
-- 非键盘事件当前忽略。
+- 非键盘事件当前忽略，包括终端 `Event::Resize`。
 
 提交时，TUI 只生成 `SendCommand(SubmitPrompt)`，不会乐观地把用户文本写入 Transcript。
 显示更新以 Core 随后发送的 `UserMessageAdded` 为准。空输入会清空编辑器但不发送命令；
@@ -107,8 +109,10 @@ reducer 产生 Effect，所有 Effect 执行完后再决定退出或重绘。`re
 Effect 中的重复请求，但当前没有定时 tick 或跨事件的刷新窗口。
 
 页面固定分为 header、transcript、status 和 prompt 四区。Transcript 使用
-`Paragraph` 换行渲染；空会话显示输入提示。当前没有滚动、Markdown、resize 专用状态或
-窄窗口降级布局。
+`Paragraph` 换行渲染；空会话显示输入提示。内容溢出时显示纵向滚动条，支持键盘翻页、
+跳到开头或末尾，并在未手动浏览历史时自动跟随最新消息。完整规则见
+[`transcript-scrolling.md`](transcript-scrolling.md)。当前没有 Markdown、resize 专用
+Action 或窄窗口降级布局；终端尺寸变化会在后续其他事件触发绘制时生效。
 
 `TerminalGuard` 从 raw mode 开启后立即接管清理。正常退出显式调用 `cleanup`；初始化后
 发生错误或 unwind 时由 `Drop` 尽力关闭 raw mode、离开 alternate screen 并显示光标。
@@ -142,7 +146,7 @@ fake Session/channel，禁止访问真实模型服务。
 
 - `/model` 与 `AgentCommand::SelectModel`；模型只能在 Core 确认后更新显示。
 - `CancelTurn`；未来 `Ctrl+C` 在 Running 时应先取消，Idle 时才退出。
-- 真正流式 Provider、跨事件重绘节流和 Transcript 自动跟随/手动滚动。
+- 真正流式 Provider、跨事件重绘节流，以及终端 resize 主动触发重绘。
 - 工具状态、审批弹窗、Markdown、多行提交策略和会话恢复。
 - 模型文本的终端控制字符过滤。
 

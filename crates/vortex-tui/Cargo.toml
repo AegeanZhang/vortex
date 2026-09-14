@@ -8,6 +8,6 @@ vortex-core.workspace = true
 
 crossterm = { workspace = true, features = ["event-stream"] }
 futures-util.workspace = true
-ratatui.workspace = true
+ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
 ratatui-textarea.workspace = true
 tokio = { workspace = true, features = ["macros"] }

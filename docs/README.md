@@ -44,6 +44,10 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：阅读 `vortex-tui`、补充 reducer/widget 测试，或增加终端交互时。
 
+- [`design/transcript-scrolling.md`](design/transcript-scrolling.md) —— Transcript 的滚动状态、自动跟随、按键映射、滚动条渲染和测试边界。
+
+  **什么时候查**：实现长对话浏览、滚动条或 Transcript resize 行为时。
+
 ## 调研
 
 技术选型与外部对照，回答"这个取舍为什么是这样"。

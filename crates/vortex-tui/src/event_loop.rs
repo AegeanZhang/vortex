@@ -57,7 +57,7 @@ pub(crate) async fn run_event_loop(
 
     loop {
         if redraw {
-            terminal.draw(|frame| render(frame, &state))?;
+            terminal.draw(|frame| render(frame, &mut state))?;
             redraw = false;
         }
 
