@@ -10,7 +10,7 @@ pub mod options;
 
 pub use error::TuiError;
 
-use crossterm::event::{Event, KeyCode, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind};
 
 use crate::{
     action::{ScrollCommand, UiAction},
@@ -38,6 +38,8 @@ pub async fn run(
     Ok(outcome)
 }
 
+const WHEEL_SCROLL_LINES: usize = 3;
+
 pub(crate) fn map_event(event: Event) -> Option<UiAction> {
     match event {
         Event::Key(key) if key.code == KeyCode::PageUp => {
@@ -63,6 +65,15 @@ pub(crate) fn map_event(event: Event) -> Option<UiAction> {
         }
         Event::Key(key) if key.code == KeyCode::Enter => Some(UiAction::SubmitPrompt),
         Event::Key(key) => Some(UiAction::EditPrompt(key.into())),
+        Event::Mouse(mouse) => match mouse.kind {
+            MouseEventKind::ScrollUp => Some(UiAction::ScrollTranscript(
+                ScrollCommand::LinesUp(WHEEL_SCROLL_LINES),
+            )),
+            MouseEventKind::ScrollDown => Some(UiAction::ScrollTranscript(
+                ScrollCommand::LinesDown(WHEEL_SCROLL_LINES),
+            )),
+            _ => None,
+        },
         _ => None,
     }
 }

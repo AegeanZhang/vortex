@@ -122,6 +122,8 @@ pub(crate) fn update(state: &mut AppState, action: UiAction) -> Vec<Effect> {
                 ScrollCommand::PageDown => state.transcript.page_down(),
                 ScrollCommand::ToTop => state.transcript.scroll_to_top(),
                 ScrollCommand::ToBottom => state.transcript.scroll_to_bottom(),
+                ScrollCommand::LinesUp(lines) => state.transcript.scroll_up(lines),
+                ScrollCommand::LinesDown(lines) => state.transcript.scroll_down(lines),
             }
 
             vec![Effect::Redraw]

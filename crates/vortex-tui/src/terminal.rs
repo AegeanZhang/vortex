@@ -1,4 +1,5 @@
 use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -21,7 +22,7 @@ impl TerminalGuard {
 
         let mut stdout = std::io::stdout();
 
-        execute!(stdout, EnterAlternateScreen)?;
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
 
         Ok(guard)
     }
@@ -34,7 +35,7 @@ impl TerminalGuard {
         disable_raw_mode()?;
 
         let mut stdout = std::io::stdout();
-        execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show)?;
+        execute!(stdout, DisableMouseCapture, LeaveAlternateScreen, crossterm::cursor::Show)?;
 
         self.active = false;
 
@@ -49,7 +50,7 @@ impl Drop for TerminalGuard {
 
             let mut stdout = std::io::stdout();
 
-            let _ = execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show);
+            let _ = execute!(stdout, DisableMouseCapture, LeaveAlternateScreen, crossterm::cursor::Show);
         }
     }
 }

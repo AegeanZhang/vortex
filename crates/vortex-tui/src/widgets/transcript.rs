@@ -196,7 +196,19 @@ impl Transcript {
         frame.render_widget(paragraph.scroll((vertical_offset, 0)), content_area);
 
         if content_height > viewport_height {
+            /*
             let mut scrollbar_state = ScrollbarState::new(content_height)
+                .position(self.scroll.offset)
+                .viewport_content_length(viewport_height);
+
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+
+            frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+            */
+
+            let scroll_positions = self.max_offset().saturating_add(1);
+
+            let mut scrollbar_state = ScrollbarState::new(scroll_positions)
                 .position(self.scroll.offset)
                 .viewport_content_length(viewport_height);
 
@@ -216,7 +228,33 @@ impl Transcript {
         self.scroll.viewport_height.saturating_sub(1).max(1)
     }
 
+    pub(crate) fn scroll_up(&mut self, lines: usize) {
+        if lines == 0 || self.max_offset() == 0 {
+            return;
+        }
+
+        self.scroll.offset = self.scroll.offset.saturating_sub(lines);
+        self.scroll.follow_tail = false;
+    }
+
+    pub(crate) fn scroll_down(&mut self, lines: usize) {
+        if lines == 0 {
+            return;
+        }
+
+        let max_offset = self.max_offset();
+
+        self.scroll.offset = self
+            .scroll
+            .offset
+            .saturating_add(lines)
+            .min(max_offset);
+
+        self.scroll.follow_tail = self.scroll.offset == max_offset;
+    }
+
     pub(crate) fn page_up(&mut self) {
+        /* 
         let max_offset = self.max_offset();
 
         if max_offset == 0 {
@@ -225,10 +263,12 @@ impl Transcript {
 
         self.scroll.offset = self.scroll.offset.saturating_sub(self.page_size());
         self.scroll.follow_tail = false;
+        */
+        self.scroll_up(self.page_size());
     }
 
     pub(crate) fn page_down(&mut self) {
-        let max_offset = self.max_offset();
+        /*let max_offset = self.max_offset();
 
         self.scroll.offset = self
             .scroll
@@ -236,7 +276,9 @@ impl Transcript {
             .saturating_add(self.page_size())
             .min(max_offset);
 
-        self.scroll.follow_tail = self.scroll.offset == max_offset;
+        self.scroll.follow_tail = self.scroll.offset == max_offset;*/
+
+        self.scroll_down(self.page_size());
     }
 
     pub(crate) fn scroll_to_top(&mut self) {

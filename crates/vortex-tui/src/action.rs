@@ -23,4 +23,6 @@ pub(crate) enum ScrollCommand {
     PageDown,
     ToTop,
     ToBottom,
+    LinesUp(usize),
+    LinesDown(usize),
 }
