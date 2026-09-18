@@ -22,8 +22,15 @@ rustc --version
 cargo build
 ```
 
-workspace 设了 `default-members = ["crates/*"]`，所以 `cargo build` 只编译产品 crate，
-不会连带编译 `playground/` 下的实验。要包含实验时显式加 `--workspace`。
+根 Workspace 只包含 `crates/*`，所以 `cargo build` 和根目录的 `cargo build --workspace`
+都只编译产品 crate。实验使用独立的 `playground/Cargo.toml`：
+
+```bash
+cargo build --manifest-path playground/Cargo.toml --workspace --locked
+```
+
+产品使用根目录 `Cargo.lock` 和 `target/`；实验使用 `playground/Cargo.lock` 和
+`playground/target/`。两个锁文件都应提交，两个构建目录均被现有 Git 规则忽略。
 
 ## 提交前的检查
 
@@ -36,18 +43,28 @@ cargo test --workspace --all-features
 cargo build --release
 ```
 
-注意 `--workspace` 会覆盖 `playground/` 下的实验 crate——`default-members` 只影响默认构建范围，
-不会让检查漏掉实验代码。
+以上命令只覆盖产品 Workspace。修改实验时单独检查：
+
+```bash
+cargo check --manifest-path playground/Cargo.toml --workspace --locked
+cargo test --manifest-path playground/Cargo.toml --workspace --locked
+```
 
 ## 运行 TUI 实验
 
 ```bash
-cargo run -p tui-demo
+cargo run --manifest-path playground/Cargo.toml -p tui-demo
 ```
 
 `playground/tui-demo` 是学习用的终端界面实验，会进入全屏备用屏幕，按 `q` 退出。
 它是交互式程序，需要真实终端，无法在管道或 CI 中验证。
 其分阶段方案与进度见 `playground/tui-demo/docs/implementation-plan.md`。
+
+Rust 入门实验使用 `cargo run --manifest-path playground/Cargo.toml -p hello-rust`。
+也可以先 `cd playground`，再运行 `cargo run -p tui-demo` 等短命令。
+
+如果 VS Code 在仓库根目录只加载了产品 Workspace，可单独打开 `playground/` 窗口来
+编辑实验；编辑器的项目加载与 Git 是否跟踪该目录是两回事。
 
 ## 产品命令的当前状态
 

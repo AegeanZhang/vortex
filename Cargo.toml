@@ -1,9 +1,7 @@
 [workspace]
 resolver = "3"
-members = [
-    "crates/*",
-    "playground/*"
-]
+members = ["crates/*"]
+exclude = ["playground"]
 
 default-members = ["crates/*"]
 

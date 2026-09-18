@@ -1,0 +1,6 @@
+[workspace]
+resolver = "3"
+members = ["hello-rust", "tui-demo"]
+
+[workspace.dependencies]
+tokio = { version = "1.53.1", default-features = false }

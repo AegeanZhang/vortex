@@ -83,13 +83,13 @@ UI 状态仍只在主循环中修改，后台任务只发送事件。取消流�
 
 先测试无终端依赖的 `update`：字符编辑、提交、滚动边界、取消和任务结束。再使用 Ratatui `TestBackend` 检查 `80x24`、`40x10` 两种尺寸的关键文本与边框位置。最后手工测试正常退出、`Ctrl+C`、主动返回错误和 resize 后的终端恢复。
 
-每完成一个阶段运行：
+每完成一个阶段，从仓库根目录运行（实验已使用独立 Workspace）：
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy -p tui-demo --all-targets -- -D warnings
-cargo test -p tui-demo
-cargo run -p tui-demo
+cargo fmt --manifest-path playground/Cargo.toml --all -- --check
+cargo clippy --manifest-path playground/Cargo.toml -p tui-demo --all-targets --locked -- -D warnings
+cargo test --manifest-path playground/Cargo.toml -p tui-demo --locked
+cargo run --manifest-path playground/Cargo.toml -p tui-demo
 ```
 
 ## 推荐按键

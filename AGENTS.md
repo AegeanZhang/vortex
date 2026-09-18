@@ -2,7 +2,7 @@
 
 ## 项目定位与规范入口
 
-Vortex 是一个用于学习 Rust 与 CLI Agent 实现细节的 Rust CLI Agent。产品代码采用 Cargo workspace 组织，`playground/` 下的实验 crate 不属于产品代码，产品 crate 不得依赖它们。
+Vortex 是一个用于学习 Rust 与 CLI Agent 实现细节的 Rust CLI Agent。根 Cargo workspace 只管理产品代码；`playground/` 是同一 Git 仓库中的独立 workspace，拥有自己的 `Cargo.lock`。实验 crate 不属于产品代码，产品 crate 不得依赖它们。
 
 本文件只保留 Agent 开始工作前必须知道的修改边界与规范入口，详细约定以对应专题文档为准：
 
