@@ -53,7 +53,11 @@ Codex 启用了 Ratatui 的 scrolling region 和多个 unstable feature；Crosst
 | Transcript | 完成的 history 通过 ANSI scrolling region 写入终端 scrollback | v0.1 不复制该复杂度；先维护内部滚动视图 |
 | 测试 | 自研 Crossterm + vt100 backend，并大量使用 insta snapshot；该提交包含约 694 个 `.snap` 文件 | snapshot 覆盖布局，PTY 测试覆盖 escape sequence 与恢复流程 |
 
-Codex 同时支持 alternate screen 和 inline 模式；当前 `auto` 默认使用 alternate screen，`--no-alt-screen` 才强制保留 inline scrollback。[模式选择逻辑](https://github.com/openai/codex/blob/068c49f075cf287a1fe7d1ee36cf005efac922e7/codex-rs/tui/src/lib.rs#L1776-L1790)
+Codex 同时支持 alternate screen 和 inline 模式；`auto` 允许使用 alternate screen，`--no-alt-screen` 禁止切换。[模式选择逻辑](https://github.com/openai/codex/blob/068c49f075cf287a1fe7d1ee36cf005efac922e7/codex-rs/tui/src/lib.rs#L1776-L1790)
+
+2026-09-15 补充：允许 alternate screen 不等于普通聊天持续占用备用屏幕。较新源码的聊天
+采用 inline 区域，Diff 等界面另行切换；调用链与菜单、多行输入的详细证据见
+[`tui-layout-and-input-research.md`](tui-layout-and-input-research.md)。本节其余选型结论保留原调研日期的语境。
 
 相关源码：[`custom_terminal.rs`](https://github.com/openai/codex/blob/068c49f075cf287a1fe7d1ee36cf005efac922e7/codex-rs/tui/src/custom_terminal.rs)、[`textarea.rs`](https://github.com/openai/codex/blob/068c49f075cf287a1fe7d1ee36cf005efac922e7/codex-rs/tui/src/bottom_pane/textarea.rs)、[`markdown_render.rs`](https://github.com/openai/codex/blob/068c49f075cf287a1fe7d1ee36cf005efac922e7/codex-rs/tui/src/markdown_render.rs)、[`event_stream.rs`](https://github.com/openai/codex/blob/068c49f075cf287a1fe7d1ee36cf005efac922e7/codex-rs/tui/src/tui/event_stream.rs)、[`insert_history.rs`](https://github.com/openai/codex/blob/068c49f075cf287a1fe7d1ee36cf005efac922e7/codex-rs/tui/src/insert_history.rs) 和 [`test_backend.rs`](https://github.com/openai/codex/blob/068c49f075cf287a1fe7d1ee36cf005efac922e7/codex-rs/tui/src/test_backend.rs)。
 

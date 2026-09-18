@@ -53,6 +53,7 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 技术选型与外部对照，回答"这个取舍为什么是这样"。
 
 - [`research/rust-tui-research.md`](research/rust-tui-research.md) —— TUI 技术选型，结论是 Ratatui + Crossterm + Tokio。
+- [`research/tui-layout-and-input-research.md`](research/tui-layout-and-input-research.md) —— Codex/Claude Code 屏幕模式与输入交互对照，以及 Vortex slash 菜单、多行输入和粘贴方案。
 - [`research/cli-design-research.md`](research/cli-design-research.md) —— Claude Code 与 Codex CLI 的接口对照，`design/cli-surface.md` 中若干决策的依据。
 - [`research/credential-handling-research.md`](research/credential-handling-research.md) —— 两者如何处理 API 密钥与 `.env`，`design/credentials.md` 的依据。
 
