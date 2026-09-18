@@ -1,6 +1,8 @@
 //! Transcript 展示组件。
 //!
 //! 负责将 Session 消息投影为对话条目，并渲染用户、Assistant 和错误消息。
+
+use crate::markdown;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -146,6 +148,7 @@ impl Transcript {
     }
 
     fn render_lines(entries: &[TranscriptEntry]) -> Vec<Line<'_>> {
+        /*
         let mut lines = Vec::new();
 
         if entries.is_empty() {
@@ -165,6 +168,32 @@ impl Transcript {
         }
 
         lines
+        */
+        if entries.is_empty () {
+            return vec![Line::from("Type a prompt and press Enter.")];
+        }
+
+        let mut lines = Vec::new();
+
+        for (index, entry) in entries.iter().enumerate() {
+            if index > 0 {
+                lines.push(Line::default());
+            }
+
+            lines.push(Line::from(format!("{}:", entry.role.label())));
+
+            match entry.role {
+                TranscriptRole::Assistant => {
+                    lines.extend(markdown::render(&entry.content));
+                }
+                TranscriptRole::User | TranscriptRole::Error => {
+                    lines.extend(entry.content.lines().map(Line::from));
+                }
+            }
+        } 
+
+        lines
+
     }
 
     pub(crate) fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {

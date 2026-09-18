@@ -2,6 +2,7 @@ mod action;
 mod app;
 mod error;
 mod event_loop;
+mod markdown;
 mod terminal;
 mod ui;
 mod widgets;
