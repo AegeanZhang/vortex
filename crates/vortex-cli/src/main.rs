@@ -55,11 +55,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             execute(prompt).await?;
         }
         None => {
-            let api_key = env::var("DEEPSEEK_API_KEY")?;
+            //let api_key = env::var("DEEPSEEK_API_KEY")?;
+            let api_key = env::var("QWEN_API_KEY")?;
 
-            let provider = Arc::new(OpenAiChatProvider::new(
+            /*let provider = Arc::new(OpenAiChatProvider::new(
                 "https://api.deepseek.com",
                 "deepseek-v4-pro",
+                api_key,
+            ));*/
+            let provider = Arc::new(OpenAiChatProvider::new(
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "qwen3.8-max",
                 api_key,
             ));
 
