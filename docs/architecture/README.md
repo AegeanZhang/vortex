@@ -8,5 +8,6 @@
 2. [`repository-structure.md`](repository-structure.md)：仓库目录、Workspace 组织和命名约束。
 3. [`technology-stack.md`](technology-stack.md)：已经确定的关键技术选型与使用边界。
 4. [`glossary.md`](glossary.md)：跨文档共用的核心术语。
+5. [`decisions/0001-transcript-markdown-rendering.md`](decisions/0001-transcript-markdown-rendering.md)：首版采用 tui-markdown 的决策、使用边界与后续演进条件。
 
 具体子系统的对外契约位于 [`../design/`](../design/)，工程实践位于 [`../engineering/`](../engineering/)。

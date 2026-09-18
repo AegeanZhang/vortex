@@ -5,6 +5,7 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 ## 架构
 
 - [`architecture/README.md`](architecture/README.md) —— 架构文档入口，包含系统总览、仓库组织、技术选型与术语表。
+- [`architecture/decisions/0001-transcript-markdown-rendering.md`](architecture/decisions/0001-transcript-markdown-rendering.md) —— 首版使用 tui-markdown 的决策逻辑、依赖边界与后续优化条件。
 
   **什么时候查**：新建 crate、决定某段代码放进哪个 crate、拿不准某处能否依赖另一个 crate 时。
 
@@ -54,6 +55,7 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 - [`research/rust-tui-research.md`](research/rust-tui-research.md) —— TUI 技术选型，结论是 Ratatui + Crossterm + Tokio。
 - [`research/tui-layout-and-input-research.md`](research/tui-layout-and-input-research.md) —— Codex/Claude Code 屏幕模式与输入交互对照，以及 Vortex slash 菜单、多行输入和粘贴方案。
+- [`research/transcript-markdown-research.md`](research/transcript-markdown-research.md) —— Markdown 渲染库选型、Codex/Claude Code 实现对照，以及 Transcript 排版、滚动和流式展示的候选方案。
 - [`research/cli-design-research.md`](research/cli-design-research.md) —— Claude Code 与 Codex CLI 的接口对照，`design/cli-surface.md` 中若干决策的依据。
 - [`research/credential-handling-research.md`](research/credential-handling-research.md) —— 两者如何处理 API 密钥与 `.env`，`design/credentials.md` 的依据。
 
