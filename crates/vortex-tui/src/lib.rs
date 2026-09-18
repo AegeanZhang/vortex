@@ -1,5 +1,6 @@
 mod action;
 mod app;
+mod command;
 mod error;
 mod event_loop;
 mod markdown;
@@ -59,11 +60,11 @@ pub(crate) fn map_event(event: Event) -> Option<UiAction> {
         {
             Some(UiAction::ScrollTranscript(ScrollCommand::ToBottom))
         }
-        Event::Key(key)
+        /*Event::Key(key)
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) =>
         {
             Some(UiAction::Quit)
-        }
+        }*/
         Event::Key(key) if key.code == KeyCode::Enter => Some(UiAction::SubmitPrompt),
         Event::Key(key) => Some(UiAction::EditPrompt(key.into())),
         Event::Mouse(mouse) => match mouse.kind {

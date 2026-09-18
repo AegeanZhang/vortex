@@ -69,12 +69,17 @@ pub(crate) fn update(state: &mut AppState, action: UiAction) -> Vec<Effect> {
             vec![Effect::Redraw]
         }
         UiAction::SubmitPrompt => {
+            let content = state.prompt_editor.take_text();
+
+            // TODO 退出命令的临时实现
+            if content.trim().eq("/exit") {
+                return vec![Effect::SendCommand(AgentCommand::Shutdown), Effect::Exit];
+            }
+
             if state.status == SessionStatus::Running {
                 state.notice = Some("a turn is already running".to_string());
                 return vec![Effect::Redraw];
             }
-
-            let content = state.prompt_editor.take_text();
 
             if content.trim().is_empty() {
                 return vec![Effect::Redraw];
