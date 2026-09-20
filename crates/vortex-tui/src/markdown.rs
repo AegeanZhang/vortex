@@ -1,5 +1,5 @@
 //! 将单条 Assistant Markdown 正文转换为 Ratatui 展示行。
-//! 
+//!
 //! 不管理消息、终端、宽度或滚动；原始内容由调用方持有。
 
 use ratatui::text::{Line, Text};

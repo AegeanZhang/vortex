@@ -68,9 +68,9 @@ pub(crate) fn map_event(event: Event) -> Option<UiAction> {
         Event::Key(key) if key.code == KeyCode::Enter => Some(UiAction::SubmitPrompt),
         Event::Key(key) => Some(UiAction::EditPrompt(key.into())),
         Event::Mouse(mouse) => match mouse.kind {
-            MouseEventKind::ScrollUp => Some(UiAction::ScrollTranscript(
-                ScrollCommand::LinesUp(WHEEL_SCROLL_LINES),
-            )),
+            MouseEventKind::ScrollUp => Some(UiAction::ScrollTranscript(ScrollCommand::LinesUp(
+                WHEEL_SCROLL_LINES,
+            ))),
             MouseEventKind::ScrollDown => Some(UiAction::ScrollTranscript(
                 ScrollCommand::LinesDown(WHEEL_SCROLL_LINES),
             )),

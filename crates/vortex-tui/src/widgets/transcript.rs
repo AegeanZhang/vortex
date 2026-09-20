@@ -169,7 +169,7 @@ impl Transcript {
 
         lines
         */
-        if entries.is_empty () {
+        if entries.is_empty() {
             return vec![Line::from("Type a prompt and press Enter.")];
         }
 
@@ -190,10 +190,9 @@ impl Transcript {
                     lines.extend(entry.content.lines().map(Line::from));
                 }
             }
-        } 
+        }
 
         lines
-
     }
 
     pub(crate) fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
@@ -273,17 +272,13 @@ impl Transcript {
 
         let max_offset = self.max_offset();
 
-        self.scroll.offset = self
-            .scroll
-            .offset
-            .saturating_add(lines)
-            .min(max_offset);
+        self.scroll.offset = self.scroll.offset.saturating_add(lines).min(max_offset);
 
         self.scroll.follow_tail = self.scroll.offset == max_offset;
     }
 
     pub(crate) fn page_up(&mut self) {
-        /* 
+        /*
         let max_offset = self.max_offset();
 
         if max_offset == 0 {
