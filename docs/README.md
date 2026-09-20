@@ -22,8 +22,9 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 单个子系统的对外契约，是写代码时的直接依据。
 
-理解当前 TUI v1 时，建议依次阅读 `session-runtime.md`、`tui-interface.md` 和
-`message-building.md`：先看运行时事实与事件，再看界面投影，最后看后续上下文构建目标。
+理解文本流式 TUI 时，建议依次阅读 `session-runtime.md`、`streaming-response.md`、
+`tui-interface.md` 和 `message-building.md`：先看运行时与流协议，再看界面投影，最后看
+后续上下文构建目标。
 
 - [`design/cli-surface.md`](design/cli-surface.md) —— `vortex` 命令行接口：模式、参数、输出契约、退出码，以及各部分归属哪个落地阶段。
 
@@ -37,17 +38,25 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：阅读 `vortex-core`、排查 TUI 为何收到某个事件，或补充 Session/Provider 测试时。
 
+- [`design/streaming-response.md`](design/streaming-response.md) —— SSE 增量接口与任务终态，以及后续 Thinking 展示/历史策略和绘制节流。
+
+  **什么时候查**：理解流式 Provider、增加思考显示或验证流中断与退出时。
+
 - [`design/message-building.md`](design/message-building.md) —— 会话事件如何形成模型上下文，以及 Tool call、Token 预算和 Provider 映射规则。
 
   **什么时候查**：实现 Agent loop、上下文压缩、工具调用或 Provider 请求转换时。
 
-- [`design/tui-interface.md`](design/tui-interface.md) —— 当前 TUI v1 的状态流、事件投影、终端生命周期，以及后续交互边界。
+- [`design/tui-interface.md`](design/tui-interface.md) —— TUI 的状态流、增量事件投影、终端生命周期，以及后续交互边界。
 
   **什么时候查**：阅读 `vortex-tui`、补充 reducer/widget 测试，或增加终端交互时。
 
 - [`design/transcript-scrolling.md`](design/transcript-scrolling.md) —— Transcript 的滚动状态、自动跟随、按键映射、滚动条渲染和测试边界。
 
   **什么时候查**：实现长对话浏览、滚动条或 Transcript resize 行为时。
+
+- [`design/development-directions.md`](design/development-directions.md) —— 后续输入、取消、配置、上下文、工具与会话能力的候选方向和依赖，不作为完成状态或固定排期。
+
+  **什么时候查**：讨论下一项能力的范围与前置条件时。
 
 ## 调研
 

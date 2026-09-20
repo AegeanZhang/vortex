@@ -6,7 +6,7 @@ use exec::execute;
 use std::{env, error::Error, sync::Arc};
 
 use vortex_core::start_session;
-use vortex_provider::OpenAiChatProvider;
+use vortex_provider::{OpenAiChatProvider, QwenThinkingOptions};
 use vortex_tui::options::TuiOptions;
 use vortex_tui::run;
 
@@ -63,11 +63,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 "deepseek-v4-pro",
                 api_key,
             ));*/
-            let provider = Arc::new(OpenAiChatProvider::new(
-                "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "qwen3.8-max",
-                api_key,
-            ));
+            let provider = Arc::new(
+                OpenAiChatProvider::new(
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "qwen3.8-max",
+                    api_key,
+                )
+                .with_qwen_thinking(QwenThinkingOptions {
+                    enabled: false,
+                    preserve_history: false,
+                }),
+            );
 
             let connection = start_session(provider);
             let tui_options = TuiOptions { color: None };

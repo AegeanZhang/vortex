@@ -84,7 +84,12 @@ pub enum ContentPart {
 
 `ItemId`、`ToolCallId` 和会话/Turn 标识应使用不同的 newtype，避免把不同 ID 当作普通字符串混用。时间戳、流式 chunk 序号和耗时属于事件元数据，不应进入模型消息，除非它们本身对任务有语义价值。
 
-隐藏推理或 chain-of-thought 不进入 `ConversationItem`、日志或下一轮上下文。只保留 Provider 明确允许展示和复用的最终文本、工具调用与摘要。
+不尝试获取 API 未公开的隐藏推理，也不从普通回答中伪造思考过程。Provider 明确提供的
+可展示思考文本/摘要与最终回答分开保存；是否回传由模型能力和显式策略决定，不一律丢弃，
+也不拼进普通 `content`。需要签名或 opaque token 的协议以后单独建模，不能用一段字符串
+假装兼容。首版千问的字段与阶段边界见 [`streaming-response.md`](streaming-response.md)。
+回传的思考需要纳入 Token 预算；未来裁剪时随对应 Assistant 原子移除，不能单独打乱。
+日志默认不记录思考、Prompt 或回答正文；诊断输出规则见该设计的安全章节。
 
 ## Instruction 模型
 

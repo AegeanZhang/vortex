@@ -6,6 +6,11 @@ edition.workspace = true
 [dependencies]
 vortex-core.workspace = true
 
+async-stream.workspace = true
+eventsource-stream.workspace = true
+futures-util.workspace = true
 reqwest.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["time"] }
 tracing.workspace = true

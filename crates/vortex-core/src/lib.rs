@@ -1,7 +1,9 @@
 mod provider;
 mod session;
 
-pub use provider::{ModelProvider, ModelRequest, ProviderError, ProviderFuture};
+pub use provider::{
+    FinishReason, ModelEvent, ModelProvider, ModelRequest, ModelStream, ProviderError,
+};
 
 pub use session::{
     AgentCommand, AgentHandle, CoreEvent, CoreEventStream, MessageRole, SessionConnection,

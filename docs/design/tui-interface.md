@@ -1,6 +1,6 @@
 # TUI 接口设计
 
-本文档以当前非流式 v1 为基线，说明 `vortex-tui` 如何消费
+本文档以文本流式接口为基线，说明 `vortex-tui` 如何消费
 `vortex-core::SessionConnection`。Session actor 和 Provider 调用链见
 [`session-runtime.md`](session-runtime.md)，技术选型见
 [`../research/rust-tui-research.md`](../research/rust-tui-research.md)。
@@ -41,12 +41,13 @@ CoreEventStream ────────────────┘             
 
 | 模块 | 当前职责 |
 | --- | --- |
-| `lib.rs` | 公开入口、键盘事件映射和 `TuiOutcome` |
+| `lib.rs` | 公开入口、键盘/鼠标事件映射和 `TuiOutcome` |
 | `terminal.rs` | 初始化 raw mode/alternate screen，并用 guard 恢复终端 |
 | `event_loop.rs` | 等待终端/Core 事件、调用 reducer、顺序执行 Effect |
 | `app.rs` | `AppState` 和唯一状态修改入口 `update` |
 | `action.rs` | `UiAction` 与 `Effect` |
-| `ui.rs` | 四区布局和只读渲染 |
+| `ui.rs` | 四区布局；渲染时允许更新 widget 的视口度量，不改变会话事实 |
+| `markdown.rs` | 单条 Assistant 正文转换，保留样式与对齐继承 |
 | `widgets/` | `PromptEditor` 与 `Transcript` 的局部状态和渲染 |
 
 后台任务不能直接修改 UI 或绘制终端。`update` 是同步纯状态转换；发送异步命令和退出循环
@@ -60,19 +61,26 @@ event bus。等第二个页面、焦点切换或真正可复用的控件出现�
 
 当前按键映射如下：
 
-- `Ctrl+C` → `UiAction::Quit`。
+- `UiAction::Quit` 复用 Shutdown → Exit；当前 `Ctrl+C` 映射已被注释，不应视为可用入口。
 - `Enter` → `UiAction::SubmitPrompt`。
 - `PageUp` / `PageDown` → Transcript 向上或向下翻页。
 - `Ctrl+Home` / `Ctrl+End` → Transcript 跳到开头或末尾。
 - 其他 `KeyEvent` → `UiAction::EditPrompt`，交给 `PromptEditor`。
-- 非键盘事件当前忽略，包括终端 `Event::Resize`。
+- 鼠标滚轮向上/向下 → Transcript 滚动 3 个渲染行，当前不按鼠标位置分区。
+- 其他鼠标事件、`Event::Resize` 和 Paste 当前忽略；尚未过滤按键 Release/Repeat。
 
 提交时，TUI 只生成 `SendCommand(SubmitPrompt)`，不会乐观地把用户文本写入 Transcript。
 显示更新以 Core 随后发送的 `UserMessageAdded` 为准。空输入会清空编辑器但不发送命令；
-`Running` 时提交会保留编辑器内容，并在状态栏显示拒绝原因。
+`Running` 时普通提交应保留编辑器内容，并在状态栏显示拒绝原因；当前代码先调用
+`take_text()` 再判断 Running，仍会清空草稿，这是待修正差异，不是目标交互。
+
+当前 `/exit` 是 `content.trim() == "/exit"` 的临时入口，可在 Running 时退出。正式 slash
+解析、菜单和粘贴方案见 [`../research/tui-layout-and-input-research.md`](../research/tui-layout-and-input-research.md)：
+要求 `/` 位于原始草稿首字符，粘贴只编辑而不执行。临时实现不代表这些规则已经落地。
 
 `Effect` 当前只有三种：发送 `AgentCommand`、请求重绘和退出。Effect 按返回顺序执行；退出
-会先发送 `Shutdown`，成功后才结束 event loop。命令 channel 关闭时返回 `TuiError`。
+会先发送 `Shutdown`，成功后才结束 event loop。Shutdown 通过独立 watch 信号通知 Core，
+发送成功不等于后台任务已经回收；它不是取消完成的确认。命令发送失败时返回 `TuiError`。
 
 ## PromptEditor 边界
 
@@ -106,16 +114,19 @@ Assistant 消息，System 消息当前不显示。
 
 Event loop 使用 `tokio::select!` 等待 `EventStream` 和 `CoreEventStream`。Action 经过
 reducer 产生 Effect，所有 Effect 执行完后再决定退出或重绘。`redraw` 标志会合并同一批
-Effect 中的重复请求，但当前没有定时 tick 或跨事件的刷新窗口。
+Effect 中的重复请求，但当前没有定时 tick 或跨事件的刷新窗口。每个文本增量都会请求重绘，
+下一轮循环即可绘制；约 33 ms 的刷新节流仍是后续目标，不是现有行为。
 
 页面固定分为 header、transcript、status 和 prompt 四区。Transcript 使用
 `Paragraph` 换行渲染；空会话显示输入提示。内容溢出时显示纵向滚动条，支持键盘翻页、
-跳到开头或末尾，并在未手动浏览历史时自动跟随最新消息。完整规则见
-[`transcript-scrolling.md`](transcript-scrolling.md)。当前没有 Markdown、resize 专用
-Action 或窄窗口降级布局；终端尺寸变化会在后续其他事件触发绘制时生效。
+跳到开头或末尾、鼠标滚轮，并在未手动浏览历史时自动跟随最新消息。完整规则见
+[`transcript-scrolling.md`](transcript-scrolling.md)。Assistant 正文通过 `markdown.rs`
+逐消息转换，User/Error 保持纯文本；标签、间距、测高与滚动仍归 Transcript。
+每次重绘按累积原文重新转换，不单独解析每个 delta，也不把展示结果写回 Session。
+当前没有 resize 专用 Action 或窄窗口降级布局；尺寸变化在后续其他事件触发绘制时生效。
 
 `TerminalGuard` 从 raw mode 开启后立即接管清理。正常退出显式调用 `cleanup`；初始化后
-发生错误或 unwind 时由 `Drop` 尽力关闭 raw mode、离开 alternate screen 并显示光标。
+发生错误或 unwind 时由 `Drop` 尽力关闭 raw mode、鼠标捕获、离开 alternate screen 并显示光标。
 TUI 运行期间不得使用 `println!` 破坏屏幕。
 
 ## 单元测试矩阵
@@ -135,7 +146,7 @@ widget 的确定性状态，不通过真实键盘或真实 Provider 制造条件
 | `ui.rs` | 标准布局与基本边框 | `TestBackend` 中四区位置正确 |
 | 同上 | 空会话、消息、notice、窄窗口 | 关键文本可见且渲染不 panic |
 | `event_loop.rs` | Effect 执行 | 命令发送、Redraw/Exit 聚合及 channel 错误正确 |
-| `lib.rs` | 输入映射 | `Ctrl+C`、Enter、普通键和非键盘事件映射正确 |
+| `lib.rs` | 输入映射 | Enter、普通键、翻页和鼠标映射正确；恢复退出快捷键时补对应测试 |
 
 终端恢复还需要人工或 PTY 集成测试，不能由 `TestBackend` 证明。event loop 测试应使用
 fake Session/channel，禁止访问真实模型服务。
@@ -146,9 +157,10 @@ fake Session/channel，禁止访问真实模型服务。
 
 - `/model` 与 `AgentCommand::SelectModel`；模型只能在 Core 确认后更新显示。
 - `CancelTurn`；未来 `Ctrl+C` 在 Running 时应先取消，Idle 时才退出。
-- 真正流式 Provider、跨事件重绘节流，以及终端 resize 主动触发重绘。
-- 工具状态、审批弹窗、Markdown、多行提交策略和会话恢复。
+- Thinking 展示与跨事件重绘节流，目标见 [`streaming-response.md`](streaming-response.md)；
+  Provider 文本流已通过现有 `AssistantTextDelta` 接口投影，无需 TUI 解析 SSE。
+- 终端 resize 主动触发重绘、工具状态、审批弹窗、多行提交策略和会话恢复。
 - 模型文本的终端控制字符过滤。
 
-这些能力应先扩展 Core 的语义命令或事件，再投影到 TUI；不得把 Provider wire 类型或
-Ratatui 控件作为跨 crate 接口。
+会话能力先扩展 Core 的语义契约，再投影到 TUI；纯展示、输入和滚动能力留在 TUI。
+不得把 Provider wire 类型或 Ratatui 控件作为跨 crate 接口。

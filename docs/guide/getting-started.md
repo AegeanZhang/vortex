@@ -1,6 +1,7 @@
 # 上手指南
 
-本文只描述**当前真实可运行**的内容。产品 TUI 已有非流式 v1；其他命令和后续能力的
+本文说明产品和实验的构建、运行入口。产品 TUI 的文本 SSE 代码已接入，验证边界与待验收
+项目见下文；不将源码已接入等同于真实模型与终端已验收。其他命令和后续能力的
 目标形态见 [`../design/cli-surface.md`](../design/cli-surface.md)，不要把设计文档中的
 未实现部分当成现有功能。
 
@@ -68,31 +69,35 @@ Rust 入门实验使用 `cargo run --manifest-path playground/Cargo.toml -p hell
 
 ## 产品命令的当前状态
 
-启动产品 TUI 前，把 DeepSeek API key 导出到当前进程环境：
+当前源码的 TUI 分支装配千问 Provider，启动前把相应 API key 导出到进程环境：
 
 ```bash
-DEEPSEEK_API_KEY=<key> cargo run -p vortex-cli
+QWEN_API_KEY=<key> cargo run -p vortex-cli
 ```
 
-产品本身不读取 `.env`。进入 TUI 后可输入 Prompt 并按 Enter 提交；当前等待完整模型回复后
-一次显示结果，按 `Ctrl+C` 退出。Provider URL 与模型暂由 CLI 固定装配。
+产品本身不读取 `.env`。输入 Prompt 后按 Enter 提交，输入 `/exit` 后按 Enter 退出。
+当前 Ctrl+C 映射已被注释；Provider URL 与模型暂由 CLI 固定装配，千问思考和思考历史均
+显式关闭。本轮仅按源码核对流式链路，没有连接真实模型服务或运行交互终端验收。
 
-当前尚未实现真正流式输出、工具调用、会话恢复、`/model`、Turn 取消和沙箱。已实现代码的
+源码中的响应链路已改为 SSE 增量展示，不再等待完整回答后一次显示；它按服务端增量更新，
+不是本地逐字动画。具体体验须按下列清单验收。Thinking 展示、跨事件定时刷新、工具调用、
+会话恢复、`/model`、保留会话的 Turn 取消和沙箱尚未实现。已实现代码的
 设计入口是 [`../design/session-runtime.md`](../design/session-runtime.md) 和
 [`../design/tui-interface.md`](../design/tui-interface.md)。
 
-手动验收时依次确认：
+文本流式的手动验收清单（待执行，不是通过记录）：
 
 1. 初始状态栏显示 `Idle`。
 2. 提交非空 Prompt 后出现 `You`，随后状态变为 `Running`。
-3. 完整模型回复显示为 `Assistant`，状态回到 `Idle`。
-4. Provider 错误显示为 `Error`，但 TUI 不退出。
-5. 请求期间按 `Ctrl+C` 能结束 Session，并恢复原始终端。
-6. 日志与错误信息中没有 API key 原文。
+3. `Assistant` 在请求完成前逐段出现，流式期间保持 `Running`，成功结束后回到 `Idle`。
+4. Provider 错误显示为 `Error`，保留已经显示的片段且 TUI 不退出；下一条 Prompt 可提交。
+5. 请求期间提交 `/exit` 能结束 Session，并恢复原始终端与鼠标行为。
+6. 浏览历史时新增内容不强制跳底；回到底部后继续自动跟随。
+7. 日志与错误信息中没有 API key 或请求/响应正文。
 
-计划中的命令与参数（`vortex exec`、`vortex resume`、审批与沙箱参数、输出契约、退出码）
-全部记录在 [`../design/cli-surface.md`](../design/cli-surface.md)。该文档描述的是目标形态，
-实现按其中的阶段表推进；本手册会随实现逐步补充，只写已经跑通的部分。
+现有 `exec` 分支未迁移到本次流式 Session 链路，不使用本节清单验收。完整命令目标
+（exec 模式、`vortex resume`、审批与沙箱参数、输出契约、退出码）记录在
+[`../design/cli-surface.md`](../design/cli-surface.md)，不可把其中所有参数视为已经实现。
 
 ## 文档导航
 

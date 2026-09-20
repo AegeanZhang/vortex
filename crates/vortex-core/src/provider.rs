@@ -1,6 +1,22 @@
-use std::{error::Error, fmt, future::Future, pin::Pin};
-
+//use std::{error::Error, fmt, future::Future, pin::Pin};
 use crate::SessionMessage;
+use futures_util::Stream;
+use std::{error::Error, fmt, pin::Pin};
+
+pub enum FinishReason {
+    Stop,
+    Length,
+    ContentFilter,
+}
+
+pub enum ModelEvent {
+    TextDelta { delta: String },
+    ReasoningDelta { delta: String },
+    Finished { reason: FinishReason },
+}
+
+pub type ModelStream =
+    Pin<Box<dyn Stream<Item = Result<ModelEvent, ProviderError>> + Send + 'static>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelRequest {
@@ -32,9 +48,12 @@ impl fmt::Display for ProviderError {
 
 impl Error for ProviderError {}
 
-pub type ProviderFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<String, ProviderError>> + Send + 'a>>;
+/*
+    pub trait ModelProvider: Send + Sync {
+    fn complete(&self, request: ModelRequest) -> ProviderFuture<'_>;
+}
+*/
 
 pub trait ModelProvider: Send + Sync {
-    fn complete(&self, request: ModelRequest) -> ProviderFuture<'_>;
+    fn stream(&self, request: ModelRequest) -> ModelStream;
 }
