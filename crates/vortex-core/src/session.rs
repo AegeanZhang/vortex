@@ -5,7 +5,6 @@ use tracing::info;
 
 use crate::{
     FinishReason, ModelEvent, ModelProvider, ModelRequest, ProviderError,
-    session::RuntimeInput::Command,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,15 +79,6 @@ pub struct AgentHandle {
 }
 
 impl AgentHandle {
-    /*
-    pub async fn send(&self, command: AgentCommand) -> Result<(), SessionError> {
-        self.sender
-            .send(command)
-            .await
-            .map_err(|_| SessionError::CommandChannelClosed)
-    }
-    */
-
     pub async fn send(&self, command: AgentCommand) -> Result<(), SessionError> {
         match command {
             AgentCommand::Shutdown => self
@@ -207,30 +197,6 @@ pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
                 }
             };
 
-            /*
-            // select 只负责取得输入，不再分支内修改复杂状态
-            let input = tokio::select! {
-                command = command_receiver.recv() => {
-                    RuntimeInput::Command(command)
-                }
-
-                item = async {
-                    active
-                        .as_mut()
-                        .expect("quarded active turn")
-                        .receiver
-                        .recv()
-                        .await
-                }, if active.is_some() => {
-                    RuntimeInput::Model(item)
-                }
-
-                _ = event_sender.closed() => {
-                    RuntimeInput::ConsumerClosed
-                }
-            };
-            */
-
             // select 结束，重新借用或取走active
             match input {
                 RuntimeInput::Command(Some(AgentCommand::SubmitPrompt { content })) => {
@@ -297,7 +263,7 @@ pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
                         messages: messages.clone(),
                     };
 
-                    // 每轮都黄建独立通道
+                    // 每轮都创建建独立通道
                     let (turn_sender, turn_receiver) =
                         tokio::sync::mpsc::channel::<Result<ModelEvent, ProviderError>>(32);
 

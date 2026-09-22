@@ -112,6 +112,12 @@ Assistant 消息，System 消息当前不显示。
 
 ## Event loop 与绘制
 
+`run(...).await` 在调用它的异步任务中进入 `run_event_loop`；后台 Session loop 已由
+`start_session` 通过 `tokio::spawn` 启动，两者并发运行。TUI 不只是命令生产者，还消费
+Session 返回的 CoreEvent；Session 不只是命令消费者，还负责发布会话事件。每轮模型
+请求另有短生命周期的任务，完整启动与调用路径见
+[`Session：启动顺序与三个执行角色`](session-runtime.md#启动顺序与三个执行角色)。
+
 Event loop 使用 `tokio::select!` 等待 `EventStream` 和 `CoreEventStream`。Action 经过
 reducer 产生 Effect，所有 Effect 执行完后再决定退出或重绘。`redraw` 标志会合并同一批
 Effect 中的重复请求，但当前没有定时 tick 或跨事件的刷新窗口。每个文本增量都会请求重绘，

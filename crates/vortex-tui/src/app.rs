@@ -3,6 +3,8 @@ use crate::widgets::{PromptEditor, Transcript};
 
 use crate::action::ScrollCommand;
 
+use tracing::trace;
+
 use vortex_core::{AgentCommand, CoreEvent, SessionSnapshot, SessionStatus};
 
 #[derive(Debug)]
@@ -70,6 +72,8 @@ pub(crate) fn update(state: &mut AppState, action: UiAction) -> Vec<Effect> {
         }
         UiAction::SubmitPrompt => {
             let content = state.prompt_editor.take_text();
+
+            trace!("original input content: {}", content);
 
             // TODO 退出命令的临时实现
             if content.trim().eq("/exit") {

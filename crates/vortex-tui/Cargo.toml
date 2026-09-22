@@ -11,4 +11,5 @@ futures-util.workspace = true
 ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
 ratatui-textarea.workspace = true
 tokio = { workspace = true, features = ["macros", "time"] }
+tracing.workspace = true
 tui-markdown.workspace = true
