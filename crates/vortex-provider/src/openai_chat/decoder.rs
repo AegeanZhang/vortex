@@ -26,12 +26,12 @@ struct ChunkDelta {
 }
 
 #[derive(Default)]
-pub(crate) struct StreamDecoder {
+pub(crate) struct OpenAiChatDecoder {
     finish_reason: Option<FinishReason>,
     done: bool,
 }
 
-impl StreamDecoder {
+impl OpenAiChatDecoder {
     pub(crate) fn push_data(&mut self, data: &str) -> Result<Vec<ModelEvent>, ProviderError> {
         if self.done {
             return Err(ProviderError::InvalidResponse(
