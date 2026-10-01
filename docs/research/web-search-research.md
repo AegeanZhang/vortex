@@ -4,7 +4,12 @@
 - 范围：Agent Web Search 的执行形态、国内外服务候选、可靠性与安全边界
 - 定位：实现前调研与首版建议，不代表已经完成依赖或接口决策
 - 关联设计：[`Message 与上下文构建`](../design/message-building.md)、[`Session Runtime`](../design/session-runtime.md)
+- 后续执行契约：[`Agent loop 与 Mock 工具`](../design/agent-loop.md)
 - 关联架构：[`架构总览`](../architecture/overview.md)、[`关键依赖与技术选型`](../architecture/technology-stack.md)
+
+本文保留 2026-09-27 调研时的基线与候选建议，“当前一次 Prompt 对应一次模型流”等描述
+是当时的问题背景，不是最新完成状态。工具版契约见上述设计，进度与验证结果见根 README；
+Tavily 仍是候选真实后端，不因 Mock 闭环而自动视为已接入。价格和额度也不因文档更新而重新核验。
 
 ## 1. 结论
 

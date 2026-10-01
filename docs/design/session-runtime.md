@@ -1,28 +1,32 @@
 # Session Runtime 设计
 
-本文档描述文本流式版本中 `vortex-core` 的 Session runtime，以及它与
+本文档描述文本流式与工具版 v1 中 `vortex-core` 的 Session runtime，以及它与
 `vortex-provider` 的边界。模型上下文未来如何裁剪和压缩，见
 [`message-building.md`](message-building.md)；TUI 如何消费 Session，见
 [`tui-interface.md`](tui-interface.md)。SSE 协议、Thinking 阶段和后续刷新策略见
 [`streaming-response.md`](streaming-response.md)；本文只描述阶段 A 的运行时契约，
-实现与验收进度以根 [`README.md`](../../README.md) 为准。
+实现与验收进度以根 [`README.md`](../../README.md) 为准。模型/工具交替执行的详细规则见
+[`agent-loop.md`](agent-loop.md)。
 
 ## 当前范围
 
-Session runtime 负责保存对话事实、串行化命令、调用模型并发布语义事件。它不知道
-HTTP、OpenAI wire format 或终端控件。每次只运行一个模型流，支持增量正文和整个 Session
-关闭；不包含 Thinking 展示、工具调用、保留会话的 Turn 取消、持久化、恢复和模型切换。
+Session runtime 负责保存对话事实、串行化命令、调度模型/工具并发布语义事件。它不知道
+HTTP、OpenAI wire format 或终端控件。每次只运行一个 Turn，Turn 内可以串行经历多个
+模型请求和工具调用，支持增量正文和整个 Session 关闭；不包含 Thinking 展示、保留
+会话的 Turn 取消、持久化、恢复和模型切换。
 
 ```text
-CLI：装配 Arc<dyn ModelProvider>，调用 start_session
+CLI：装配 Arc<dyn ModelProvider> 和 ToolRegistry，调用 start_session
                        │ SessionConnection
                        v
 TUI ──AgentHandle（命令 / 关闭信号）──> Session actor
 TUI <────────CoreEventStream───────── Session actor
-                                          │ ModelRequest
+                                          │ history 副本、Provider、Tools
                                           v
-                                     Provider task
-                                          │ ModelEvent / Err
+                                     run_turn task
+                                     ├── ModelProvider::stream
+                                     └── ToolRegistry::execute
+                                          │ TurnProgress
                                           v
                                      Session actor
 ```
@@ -32,35 +36,39 @@ TUI <────────CoreEventStream───────── Session 
 | 类型 | 当前职责 |
 | --- | --- |
 | `ModelProvider` | `stream(ModelRequest)` 返回惰性 `ModelStream`，流元素为 `Result<ModelEvent, ProviderError>` |
-| `ModelEvent` | `TextDelta`、`ReasoningDelta` 和携带 `FinishReason` 的 `Finished`；阶段 A 拒绝思考增量 |
+| `ModelRequest` | `items: Vec<ConversationItem>` 和 `tools: Vec<ToolSpec>`，不含厂商协议类型 |
+| `ModelEvent` | `TextDelta`、`ReasoningDelta`、完整 `ToolCall` 和携带 `FinishReason` 的 `Finished` |
+| `ToolRegistry` | 持有可用工具，稳定返回定义，执行并归一化结果 |
 | `SessionConnection` | 一次性交付初始 `SessionSnapshot`、命令句柄和独占事件流 |
 | `AgentHandle` | 可克隆的命令入口；业务命令走有界 channel，Shutdown 走独立 watch 信号 |
 | `CoreEventStream` | 单消费者事件入口；隐藏接收端实现 |
 | `AgentCommand` | 当前只有 `SubmitPrompt` 和 `Shutdown` |
-| `CoreEvent` | 描述用户消息、Assistant 生命周期、完成、失败和命令拒绝 |
+| `CoreEvent` | 描述用户消息、Assistant 生命周期、工具开始/完成、Turn 完成/失败和命令拒绝 |
 
-`start_session(Arc<dyn ModelProvider>)` 创建容量为 32 的命令 channel 和容量为 128 的
-事件 channel，并启动一个 Tokio task；每个 Turn 另建容量为 32 的模型事件 channel。
+`start_session(Arc<dyn ModelProvider>, ToolRegistry)` 创建容量为 32 的命令 channel 和容量为
+128 的事件 channel，并启动一个 Tokio task；每个 Turn 另建容量为 32 的 `TurnProgress`
+channel。无工具调用方使用 `ToolRegistry::empty()`；阶段 A 仍拒绝思考增量。
 初始 Snapshot 固定为空消息和 `Idle`；当前尚未实现
 历史恢复，因此这里还不承担“快照与订阅原子建立”的完整语义。
 
 ## 启动顺序与三个执行角色
 
-CLI 的 TUI 分支先调用 `start_session(provider)`，再执行
+CLI 的 TUI 分支先调用 `start_session(provider, tools)`，再执行
 `run(connection, tui_options).await`。两者不是“Session 执行完才启动 TUI”：
 
 1. `start_session` 创建 channel，通过 `tokio::spawn` 启动后台 Session loop，随后返回
    `SessionConnection`，不等待这个 loop 结束。
 2. TUI 的 `run` 初始化终端，再 `.await run_event_loop`。该循环在调用它的异步任务中
    执行；调用 async 函数并 `.await` 不会自动创建一个新 task 或独立线程。
-3. Session 接受有效 Prompt 后，通过 `turns.spawn` 创建本轮模型任务。它消费 Provider
-   流并转发增量，本轮结束后退出，不是随 Session 一直运行的第三个长期循环。
+3. Session 接受有效 Prompt 后，通过 `turns.spawn(run_turn(...))` 创建本轮任务。它消费
+   Provider 流、执行工具并在必要时再次请求模型；Turn 结束后退出，不是随 Session
+   一直运行的第三个长期循环。
 
 | 执行角色 | 消费什么 | 生产什么 |
 | --- | --- | --- |
 | TUI loop | 键盘/鼠标事件、CoreEvent | 用户操作对应的 AgentCommand；本地状态更新与绘制 |
-| Session loop | AgentCommand、关闭信号、模型事件 | CoreEvent；调度本轮模型任务 |
-| 单轮模型任务 | Provider 返回的 ModelStream | 发往 Session 内部通道的 ModelEvent 或 ProviderError |
+| Session loop | AgentCommand、关闭信号、TurnProgress | CoreEvent；维护历史并调度本轮任务 |
+| 单轮 run_turn 任务 | ModelStream、工具执行结果 | TurnProgress；任务返回 TurnOutput 或 TurnError |
 
 因此 TUI 和 Session 是双向通信：TUI 是命令生产者、会话事件消费者；Session 是命令
 消费者、会话事件生产者。Channel 传递的是命令或事件数据，不是 Tokio task，也不会
@@ -81,9 +89,10 @@ CLI 的 TUI 分支先调用 `start_session(provider)`，再执行
 3. Session loop 的 `tokio::select!` 通过 `command_receiver.recv()` 接收命令，包装为
    `RuntimeInput::Command`，再交给下面的 `match input` 分派处理。
 4. `SubmitPrompt` 分支校验输入和 Session 状态。拒绝时发布 `CommandRejected`；接受时
-   保存 User、发布开始事件、构建 `ModelRequest`，然后启动本轮模型任务。
-5. 模型任务通过 `stream.next().await` 读取增量，用 `turn_sender` 发回 Session；Session
-   在 `active.receiver.recv()` 分支接收，累积正文并发布相应 `CoreEvent`。
+   保存 User、发布开始事件，再将历史副本和工具注册表交给本轮 `run_turn`。
+5. `run_turn` 构建每个模型步骤的请求，通过 `stream.next().await` 读取增量、必要时执行
+   工具，用 `turn_sender` 发送 TurnProgress。Session 在 `active.receiver.recv()` 分支
+   接收，记录完成的工具步骤并发布对应 CoreEvent；最终 Assistant 由任务返回值提交。
 6. TUI 在 `events.recv()` 分支接收 CoreEvent，经 `update` 更新界面状态并请求重绘。
    业务结果通过这条事件通道返回，不通过最初 `send` 的返回值返回。
 
@@ -104,8 +113,8 @@ Session 通过关闭标志检查或 `shutdown_receiver.changed()` 响应。这�
 函数返回不会结束后台任务：`tokio::spawn` 已将任务交给 Tokio runtime 持有并调度，
 任务的生命周期不再依附于这次函数调用的栈帧。
 
-- `async move` 将 `command_receiver`、`event_sender`、`shutdown_receiver` 和 `provider`
-  等捕获值移入任务；任务内部创建的 `messages`、`status`、`active` 和 `turns` 也由任务
+- `async move` 将 `command_receiver`、`event_sender`、`shutdown_receiver`、`provider`
+  和 `tools` 等捕获值移入任务；内部创建的 `history`、`status`、`active` 和 `turns` 也由任务
   持有。等待 channel 时这些状态仍保留，不是继续借用已经返回的函数栈。
 - `tokio::spawn` 返回 `JoinHandle`，可用于等待任务结果或请求中止。当前代码没有保存它；
   丢弃 JoinHandle 只会使任务脱离该句柄的等待与控制，不会取消任务。
@@ -116,7 +125,8 @@ Session 通过关闭标志检查或 `shutdown_receiver.changed()` 响应。这�
 循环。释放一个 AgentHandle 克隆不等于关闭所有发送端；释放事件接收端则会让 Session
 检测到消费者消失。丢弃这些端点是通过通道状态促使任务退出，不是同步等待任务结束。
 
-正常离开循环会调用 `turns.abort_all()` 请求中止活跃模型任务；它本身不等待取消完成。
+正常离开循环会调用 `turns.abort_all()` 请求中止活跃 Turn 任务（包括等待中的模型/工具
+future）；它本身不等待取消完成，也不保证未来外部进程工具自动终止。
 `JoinSet` 与 `JoinHandle` 的 Drop 行为不同：丢弃 JoinSet 会中止其中尚未完成的任务。
 Session task 若 panic 并展开栈，JoinSet 的析构也会请求中止子任务；Tokio runtime 关闭
 同样可能取消未结束的异步任务，不能把这些异常退出等同于完整走完业务收尾或发布终态。
@@ -127,15 +137,19 @@ Session task 若 panic 并展开栈，JoinSet 的析构也会请求中止子任�
 
 ### Session 内部状态与并发边界
 
-Session actor 独占 `messages`、`status`、`ActiveTurn` 和 `JoinSet<()>`，其他模块不能
-直接修改这些状态。事件循环使用 `tokio::select!` 等待命令、单轮模型事件、关闭信号和
+Session actor 独占 `history`、`status`、`ActiveTurn` 和
+`JoinSet<Result<TurnOutput, TurnError>>`，其他模块不能直接修改这些状态。
+事件循环使用 `tokio::select!` 等待命令、TurnProgress、关闭信号和
 UI 消费者关闭；先得到 `RuntimeInput`，再更新状态，避免跨分支借用活跃 Turn。
 
-- `messages` 是模型请求的事实来源；只有已接受的用户消息和成功回复会写入。
+- `history: Vec<ConversationItem>` 是权威请求历史，保存已接受的 User、已完成工具步骤
+  的 Assistant 前缀/调用/结果，以及最终成功 Assistant。
 - `status` 为 `Running` 时拒绝新的 Prompt，因此逻辑上最多只有一个活跃 Turn。
-- `ActiveTurn` 保存接收端、累积正文和待确认 outcome；思考缓冲仅预留，不参与阶段 A。
-- Provider task 只转发事件，发送 Finished/Err 后返回；它独占发送端，不直接修改历史。
-- Finished/Err 只记录 outcome；actor 等通道排空并关闭，再回收 task、校验并发布终态。
+- `ActiveTurn` 只保存 TurnProgress 接收端；不再累积正文或保存模型 outcome。
+- `run_turn` 独占进度发送端，累积每个模型步骤的正文并维护本地 `context`；不直接修改
+  Session 权威历史。工具步骤通过 ToolFinished 回填，最终回答通过 TurnOutput 返回。
+- actor 等进度通道排空并关闭，再 `join_next()` 回收任务；只有正常返回 `Ok(TurnOutput)`
+  才提交最终 Assistant 并发布 TurnCompleted，任务错误或 panic 统一失败。
 - `Shutdown`、所有命令句柄关闭或事件消费者消失时，actor 中止活跃 task 并退出。
 
 向 UI 发布事件统一经过 `publish_event`，同时监听关闭信号。即使 UI 队列已满，Shutdown
@@ -150,9 +164,11 @@ UI 消费者关闭；先得到 `RuntimeInput`，再更新状态，避免跨分�
 SubmitPrompt
   -> UserMessageAdded
   -> AssistantMessageStarted
-  -> ModelProvider::stream
-  -> AssistantTextDelta（一次或多次）
-  -> Finished(Stop)，内部通道排空并关闭，task 正常结束
+  -> run_turn：ModelProvider::stream
+  -> [AssistantTextDelta（可选前缀）
+      -> ToolCallStarted -> ToolCallFinished -> 再次 ModelProvider::stream]（零到多次）
+  -> AssistantTextDelta（最终回答，一次或多次）
+  -> run_turn 返回，内部进度通道排空并关闭，task 正常结束
   -> TurnCompleted
 ```
 
@@ -160,22 +176,26 @@ SubmitPrompt
 `CommandRejected`；`Running` 期间再次提交也发出 `CommandRejected`。两种拒绝都不修改
 消息历史和 Session 状态。
 
-图中 Finished 是 Provider 事件，不直接发给 TUI。仅在 task 正常结束、结束原因为 `Stop`
-且累积正文非空时成功；完整 Assistant 只写入历史一次，不重发完整正文 Delta。
+Finished 是每个模型步骤的 Provider 事件，不直接发给 TUI。ToolCalls 结束当前模型步骤，
+不是结束整个 Turn；仅在最终步骤以 Stop 结束、正文非空且任务正常返回时成功。
+最终 Assistant 只写入历史一次，不重发完整正文 Delta。
 
-Provider 错误、缺少终态、task 异常、`Length`、`ContentFilter` 或空正文均导致 `Failed`
-和一次 `TurnFailed`。阶段 A 收到 `ReasoningDelta` 时记录协议错误，关闭本轮接收端并
-中止 task；忽略已排队的后续内容，再统一收尾，不等远端继续生成完毕。
+Provider 错误、缺少终态、task 异常、Length、ContentFilter、空最终正文、工具轮数超限
+或非法调用 ID 均导致 Failed 和一次 TurnFailed。阶段 A 收到 ReasoningDelta 时，
+`run_turn` 返回协议错误并释放流；Session 排空已发送进度后统一收尾，不等远端生成完毕。
+未知工具、工具参数/执行错误则成为错误 ToolResult，交给下一步模型处理，不直接失败。
 
-本轮已接受的 User 消息保留，但失败 Assistant 不进入 `messages`；TUI 可保留已显示的
-片段并标记错误。`Failed` 不阻止下一次提交：下一条有效 Prompt 重新进入 `Running`，
+本轮已接受的 User 及已完成的工具步骤保留，但失败模型步骤的部分 Assistant 不进入
+`history`；TUI 可保留已显示片段并标记错误。Failed 不阻止下一次提交：有效 Prompt
+重新进入 Running，
 成功后回到 `Idle`。下一轮可能包含连续 User 消息，当前不回滚也不自动重试。
 
 ## Provider 适配边界
 
 `vortex-provider::OpenAiChatProvider` 是当前唯一实现。它把 `MessageRole` 映射为
 OpenAI-compatible Chat Completions 的 `user`、`assistant`、`system`，发送
-`stream: true`，将 SSE choice 0 的正文转换为 `TextDelta`。泛用构造器省略千问专用参数；
+`stream: true`，将 SSE choice 0 的正文转换为 TextDelta，并组装单个完整 ToolCall。
+请求中的工具定义/调用/结果映射见 [Agent loop](agent-loop.md)。泛用构造器省略千问专用参数；
 CLI 用 `QwenThinkingOptions` 显式关闭思考及思考历史。仅改变该开关不能完成 Thinking 接入。
 
 Provider 负责 HTTP 状态、SSE Content-Type、分帧与 JSON 校验，并要求合法 `finish_reason`
@@ -198,13 +218,15 @@ Provider 负责 HTTP 状态、SSE Content-Type、分帧与 JSON 校验，并要�
 | 同上 | 空白 Prompt | 只收到 `CommandRejected`，Provider 未调用 |
 | 同上 | Turn 运行中再次提交 | 第二条命令被拒绝，第一条仍可完成 |
 | 同上 | Provider 返回错误后重试 | 收到 `TurnFailed`；失败 User 保留、无失败 Assistant，随后可再次提交 |
-| 同上 | 缺少终态、异常结束、非 Stop 或空正文 | 发一次失败，不提交 Assistant 历史 |
-| 同上 | 阶段 A 收到 ReasoningDelta | 关闭接收端并中止持续生成的流，不再转发后续正文 |
+| 同上 | 缺少终态、异常结束、Length/ContentFilter 或空最终正文 | 发一次失败，不提交失败步骤的 Assistant |
+| 同上 | 阶段 A 收到 ReasoningDelta | run_turn 立即返回错误，释放流，不再读取后续正文 |
 | 同上 | `Shutdown` 与背压 | 活跃流及阻塞的事件发送可被中断，事件流最终关闭 |
-| `vortex-provider/src/lib.rs` | 请求映射 | 三种 role/content 正确，`stream` 为 true，千问开关按显式选项写入 |
-| 同上及 `src/sse.rs` | HTTP/SSE 异常与结束 | 状态码、Content-Type、坏 JSON、缺 DONE、超时映射正确；统计包不结束 Turn |
-| 同上 | 字节分帧与增量 | 中文跨 chunk、多行 data、同包多事件不丢内容，结束包可携带最后一段正文 |
-| 同上 | 密钥脱敏 | `SecretString` 的 Debug 不包含原始密钥 |
+| 同上 | 工具步骤后模型失败 | 保留完成的前缀/调用/结果，失败部分正文不入历史 |
+| `vortex-core/src/agent_loop.rs`、`tool.rs` | 工具闭环与异常 | 结果回填、错误恢复、轮数和 ID 校验；详见 agent-loop.md |
+| `vortex-provider/src/openai_chat/request.rs` | 请求映射 | role/content、工具定义与结果正确，stream 为 true，千问开关按显式选项写入 |
+| `src/openai_chat/decoder.rs`、`src/sse_transport.rs` | HTTP/SSE 异常与结束 | 状态码、Content-Type、坏 JSON、缺 DONE、超时映射正确；统计包不结束模型步骤 |
+| 同上 | 字节分帧与工具增量 | 中文跨 chunk、多行 data 不丢内容；参数拼接、空 ID 和非空 ID 变化正确处理 |
+| `src/openai_chat/mod.rs` | 密钥脱敏 | SecretString 的 Debug 不包含原始密钥 |
 
 并发测试应使用 `oneshot`、`Notify` 或受控 fake Provider 明确控制完成时机，不依赖
 `sleep` 猜测调度。Core fake 测试绕过 HTTP/SSE，不能替代 Provider 测试；后者优先测试
@@ -213,5 +235,5 @@ Provider 负责 HTTP 状态、SSE Content-Type、分帧与 JSON 校验，并要�
 ## 后续演进
 
 Thinking 需要增加 Core 的思考事件及 TUI 投影；思考历史还需单独扩展消息结构，具体规则
-见流式响应设计。`CancelTurn`、恢复历史、工具事件和模型切换也应先扩展 Core
+见流式响应设计。CancelTurn、恢复历史、工具详情/审批事件和模型切换也应先扩展 Core
 契约，再由 CLI 或 TUI 使用，不能把厂商响应或界面状态塞进 `CoreEvent`。

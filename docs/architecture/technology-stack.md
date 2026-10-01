@@ -9,8 +9,10 @@
 | 配置格式 | TOML | 用户级与项目级分层加载；密钥值不进入配置文件 |
 | TUI | Ratatui + Crossterm | Ratatui 负责布局渲染，Crossterm 负责终端与事件；Tokio 统一事件循环 |
 | Transcript Markdown | tui-markdown | 仅 vortex-tui 使用，首版关闭默认 features，Assistant 正文按消息转换，User/Error 保持纯文本 |
-| HTTP | Reqwest | 只位于 Provider 实现层，不进入 `vortex-core` 公共接口 |
+| HTTP | Reqwest | Provider 传输与后续真实网络工具的实现依赖，不进入 Core 公共接口；旧 exec 路径仍待迁移 |
 | SSE | eventsource-stream + async-stream | Provider 内分帧并构造惰性模型流，Core 只消费语义事件 |
+| 结构化 JSON | serde_json | Core/Tools 表达工具 Schema 与参数，Provider 映射载荷；不等于已接入 Schema 验证器 |
+| 日志 | tracing + tracing-subscriber + tracing-appender | CLI 初始化一次文件 subscriber，其余 crate 发事件；不向 TUI 屏幕输出 |
 | 会话格式 | JSONL 事件日志 | 便于追加、审计与异常退出恢复 |
 | 工具协议 | JSON Schema、stdio MCP | 所有带副作用的调用统一经过权限策略 |
 | Linux 沙箱 | Bubblewrap | 默认限制写入当前工作区并禁止网络 |
@@ -40,3 +42,14 @@ TUI 选型依据见 [`../research/rust-tui-research.md`](../research/rust-tui-re
 Core 使用 `futures-util` 的通用 Stream 接口，不依赖 HTTP/SSE 类型。Tokio `time` feature
 由需要网络超时、测试超时或绘制定时器的 crate 按需启用；启用 feature 不代表 TUI 已实现
 定时刷新。不得用网络 chunk 边界代替 SSE 分帧，也不默认引入自动重连。
+
+## 工具与日志依赖边界
+
+Core 定义 Tool trait 与注册表，只依赖通用 Future/JSON 类型；vortex-tools 通过 workspace
+依赖 Core 和 serde_json，CLI 依赖具体实现进行注册。Mock 搜索没有 HTTP 依赖；后续真实
+搜索的客户端留在具体 Tool 实现层，候选后端见 [调研](../research/web-search-research.md)。
+
+CLI 初始化非阻塞 JSON 文件日志，WorkerGuard 保持到 main 结束；日志路径为
+`$VORTEX_HOME/logs/vortex.log`。RUST_LOG 与 verbose 的实际优先级、TRACE 输入风险见
+[上手指南](../guide/getting-started.md#日志与本地配置)。配置 TOML、JSONL 会话与 MCP/
+Bubblewrap 仍是确定的目标选型，不是可由依赖表推断出的现有能力。

@@ -1,10 +1,5 @@
 use futures_util::StreamExt;
-use std::{
-    collections::BTreeSet,
-    error::Error,
-    fmt,
-    sync::Arc
-};
+use std::{collections::BTreeSet, error::Error, fmt, sync::Arc};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -16,8 +11,12 @@ const MAX_TOOL_ROUNDS: usize = 4;
 
 #[derive(Debug)]
 pub(crate) enum TurnProgress {
-    TextDelta { delta: String },
-    ToolStarted { call: ToolCall},
+    TextDelta {
+        delta: String,
+    },
+    ToolStarted {
+        call: ToolCall,
+    },
     ToolFinished {
         assistant_prefix: Option<String>,
         call: ToolCall,
@@ -34,7 +33,7 @@ pub(crate) struct TurnOutput {
 pub(crate) enum TurnError {
     Provider(ProviderError),
     InvalidModelSequence(String),
-    ToolRoundLimit {limit: usize},
+    ToolRoundLimit { limit: usize },
     ProgressChannelClosed,
 }
 
@@ -66,7 +65,7 @@ impl Error for TurnError {
 
 impl From<ProviderError> for TurnError {
     fn from(error: ProviderError) -> Self {
-        Self::Provider(error) 
+        Self::Provider(error)
     }
 }
 
@@ -171,7 +170,7 @@ pub(crate) async fn run_turn(
                 if tool_rounds >= MAX_TOOL_ROUNDS {
                     return Err(TurnError::ToolRoundLimit {
                         limit: MAX_TOOL_ROUNDS,
-                    })
+                    });
                 }
 
                 // 只检查是否为空，不修改Provider 返回的原始 ID.
@@ -191,10 +190,7 @@ pub(crate) async fn run_turn(
 
                 tool_rounds += 1;
 
-                send_progress(
-                    &progress,
-                    TurnProgress::ToolStarted { call: call.clone() },
-                ).await?;
+                send_progress(&progress, TurnProgress::ToolStarted { call: call.clone() }).await?;
 
                 let result = tools.execute(&call).await;
                 let assistant_prefix = (!content.is_empty()).then_some(content);
@@ -205,8 +201,9 @@ pub(crate) async fn run_turn(
                         assistant_prefix: assistant_prefix.clone(),
                         call: call.clone(),
                         result: result.clone(),
-                    }
-                ).await?;
+                    },
+                )
+                .await?;
 
                 if let Some(prefix) = assistant_prefix {
                     context.push(ConversationItem::Message(SessionMessage {

@@ -3,8 +3,8 @@ use tokio::sync::watch;
 use tracing::info;
 
 use crate::{
-    ConversationItem, MessageRole, ModelProvider, SessionMessage, ToolCall,
-    ToolRegistry, ToolResult,
+    ConversationItem, MessageRole, ModelProvider, SessionMessage, ToolCall, ToolRegistry,
+    ToolResult,
     agent_loop::{TurnError, TurnOutput, TurnProgress, run_turn},
 };
 
@@ -144,10 +144,7 @@ async fn publish_event(
     }
 }
 
-pub fn start_session(
-    provider: Arc<dyn ModelProvider>,
-    tools: ToolRegistry,
-) -> SessionConnection {
+pub fn start_session(provider: Arc<dyn ModelProvider>, tools: ToolRegistry) -> SessionConnection {
     info!("Session runtime starting");
 
     let (command_sender, mut command_receiver) = tokio::sync::mpsc::channel::<AgentCommand>(32);
@@ -158,8 +155,7 @@ pub fn start_session(
     tokio::spawn(async move {
         let mut history = Vec::<ConversationItem>::new();
         let mut status = SessionStatus::Idle;
-        let mut turns =
-            tokio::task::JoinSet::<Result<TurnOutput, TurnError>>::new();
+        let mut turns = tokio::task::JoinSet::<Result<TurnOutput, TurnError>>::new();
         let mut active: Option<ActiveTurn> = None;
 
         //let mut messages = Vec::<SessionMessage>::new();
@@ -330,12 +326,7 @@ pub fn start_session(
                     let tools = tools.clone();
                     let turn_history = history.clone();
 
-                    turns.spawn(run_turn(
-                        provider,
-                        tools,
-                        turn_history,
-                        turn_sender,
-                    ));
+                    turns.spawn(run_turn(provider, tools, turn_history, turn_sender));
                 }
 
                 RuntimeInput::Shutdown
@@ -396,7 +387,6 @@ pub fn start_session(
                     }
                 }
                 */
-
                 RuntimeInput::Turn(Some(TurnProgress::TextDelta { delta })) => {
                     if !publish_event(
                         &event_sender,
@@ -613,13 +603,13 @@ mod tests {
     use tokio::sync::{mpsc, oneshot, watch};
 
     use crate::{
-        ConversationItem, FinishReason, MessageRole, ModelEvent, ModelProvider, 
-        ModelRequest, ModelStream, ProviderError, SessionMessage, ToolRegistry,
+        ConversationItem, FinishReason, MessageRole, ModelEvent, ModelProvider, ModelRequest,
+        ModelStream, ProviderError, SessionMessage, ToolRegistry,
     };
 
     use super::{
-        AgentCommand, AgentHandle, CoreEvent, CoreEventStream, SessionConnection,
-        publish_event, start_session,
+        AgentCommand, AgentHandle, CoreEvent, CoreEventStream, SessionConnection, publish_event,
+        start_session,
     };
 
     type ModelItem = Result<ModelEvent, ProviderError>;

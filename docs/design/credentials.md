@@ -6,7 +6,8 @@
 
 ## 设计前提
 
-`README.md` 与 `AGENTS.md` 中的原有约定："API 密钥只能从环境变量读取，日志和错误信息必须脱敏。"
+README 与 [架构总览](../architecture/overview.md) 约定："API 密钥只能从环境变量读取，
+日志和错误信息必须脱敏。" AGENTS.md 只保留修改边界与规范入口。
 
 该表述实际包含两条强度不同的约束，本设计将其拆开并分别表态：
 
@@ -47,7 +48,9 @@ DEEPSEEK_API_KEY=sk-...
 set -a; . ./.env; set +a
 ```
 
-`.env` 中**只放密钥**。`base_url`、模型名、超时等非秘密配置一律走分层 TOML——它们需要被版本化和 review，散落在 `.env` 中既无必要也难以追踪。
+目标是 `.env` 只注入密钥，base_url、模型名、超时等普通配置走分层 TOML。当前 TOML
+加载尚未接入，Provider 地址/模型固定在 CLI；运行时日志路径由 VORTEX_HOME 环境变量
+提供，可以在被 Git 忽略的本地启动脚本中导出。不要把下面的目标配置示例当作现有解析能力。
 
 ## Provider 配置形状
 
@@ -69,7 +72,7 @@ api_key_env  = "DEEPSEEK_API_KEY"     # 变量名，不是值
 
 ## 脱敏要求
 
-`AGENTS.md` 要求日志和错误信息脱敏，落到具体规则：
+架构要求日志和错误信息脱敏，落到具体规则：
 
 - 密钥值不得出现在任何日志级别、任何错误链、任何 `--json` 事件中
 - `Authorization` 等认证头在记录请求时必须掩码，只保留前缀（如 `Bearer sk-***`）
@@ -77,6 +80,10 @@ api_key_env  = "DEEPSEEK_API_KEY"     # 变量名，不是值
 - 相应地需要一条测试：断言持密类型的 `Debug` 与 `Display` 输出中不含密钥原文
 
 第三条是最容易在调试时被绕过的：临时加一句 `dbg!(&request)` 就会泄露，而派生的 `Debug` 让它看起来无害。用类型层面的实现堵住，比依赖纪律可靠。
+
+当前 SecretString 使用手写脱敏 Debug，但 TUI 提交分支仍有输入正文 TRACE；这不满足
+完整的内容保护要求。启用 vortex_tui=trace 或全局 trace 前需确认日志内容风险，不能把
+持密类型脱敏等同于 Prompt/工具结果的日志安全。实际日志入口见 [指南](../guide/getting-started.md#日志与本地配置)。
 
 ## 代价
 

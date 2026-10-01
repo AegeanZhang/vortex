@@ -90,7 +90,7 @@ fn map_tool_spec(spec: ToolSpec) -> ChatTool {
             name: spec.name,
             description: spec.description,
             parameters: spec.input_schema,
-        }
+        },
     }
 }
 

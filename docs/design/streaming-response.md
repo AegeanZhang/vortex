@@ -1,12 +1,12 @@
 # SSE 流式回答与 Thinking 展示设计
 
-- 日期：2026-09-19
-- 定位：文本 SSE 契约及后续 Thinking/绘制节流设计；阶段 A 与阶段 B/C 不可混为一谈。
+- 日期：2026-09-19；代码契约更新：2026-10-01
+- 定位：文本/工具 SSE 契约及后续 Thinking/绘制节流设计；阶段 A 与阶段 B/C 不可混为一谈。
 - 范围：TUI → Session → 当前 Chat Completions 兼容 Provider；本轮不迁移 exec。
 
 文本流运行时见 [Session runtime](session-runtime.md)，显示边界见
-[TUI](tui-interface.md) 与 [滚动设计](transcript-scrolling.md)。实现步骤保存在本地
-`md.local.temp/20260919-01.md`；它被 Git 忽略，本文独立保留全部长期契约。
+[TUI](tui-interface.md) 与 [滚动设计](transcript-scrolling.md)。工具循环见
+[Agent loop](agent-loop.md)。本地实施稿不作为长期契约依赖，本文保留流式接口规则。
 实现与验收进度以根 [README](../../README.md) 为准，不以阶段表或测试矩阵代替完成记录。
 
 ## 1. 目标与阶段
@@ -16,21 +16,23 @@
 
 | 阶段 | 请求与展示 | 历史策略 |
 | --- | --- | --- |
-| A：文本 SSE | 当前千问显式关闭思考，打通真实文本流、错误和退出 | 仅完整成功回答进入历史 |
+| A：文本/工具 SSE | 千问显式关闭思考，正文增量与单个工具调用分别处理 | 完成的工具步骤与最终成功回答进入历史 |
 | B：Thinking 展示 | 显式开启思考，思考纯文本与 Markdown 回答分区 | 显式关闭思考回传，思考仅保留于本次 UI |
 | C：思考历史（可选后续） | 启用前先扩展语义消息及请求映射 | 成功回答的思考独立保存，按支持的协议完整回传 |
 
-阶段 A 的接口已接入代码，但仍需补充 Provider 测试及真实服务验收。阶段 B/C 尚未实现；
-阶段 B 的目标是范围明确的思考展示，不假装支持默认开启的思考历史。阶段 C 不是显示 Thinking
-的前置条件。暂不实现 Tool call、CancelTurn、重连续传、usage UI、菜单折叠或持久化。
+阶段 A 的协议允许完整 ToolCall 结束一个模型步骤，再由 Core 决定执行和下一步请求；
+一个模型流完成不等于整个 Turn 完成。阶段 B 的目标是范围明确的思考展示，不假装支持
+默认开启的思考历史。阶段 C 不是显示 Thinking 的前置条件。CancelTurn、重连续传、
+usage UI、菜单折叠和持久化不属于此版接口；阶段与测试覆盖现状见根 README。
 Shutdown 仍表示退出整个 Session，而非“取消本轮后继续聊天”。
 
 ## 2. 分层与接口
 
 ```text
 HTTP bytes → SSE event → Provider ModelEvent
-                           ↓ 有界的单轮内部通道
-                     Session actor：累积、历史、终态
+                           ↓ run_turn：累积正文、执行工具、再次请求
+                           ↓ 有界 TurnProgress 通道
+                     Session actor：权威历史、事件、终态
                            ↓ CoreEvent
                      TUI：投影、Markdown、滚动、绘制
 ```
@@ -51,11 +53,13 @@ pub trait ModelProvider: Send + Sync {
 pub enum ModelEvent {
     TextDelta { delta: String },
     ReasoningDelta { delta: String },
+    ToolCall { call: ToolCall },
     Finished { reason: FinishReason },
 }
 
 pub enum FinishReason {
     Stop,
+    ToolCalls,
     Length,
     ContentFilter,
 }
@@ -63,7 +67,8 @@ pub enum FinishReason {
 
 `stream()` 本身不等待网络；返回流拥有 HTTP client、请求和必要配置，第一次 poll 才发起
 请求。`'static` 表示不借用短生命周期的 `&self`，不是让数据泄漏或永久存活。错误使用
-`Result::Err`，与正常结束原因区分。未知结束原因/不支持的工具调用返回协议错误，不猜测成功。
+`Result::Err`，与正常结束原因区分。未知结束原因、不支持的多调用或 legacy function_call
+返回协议错误，不猜测成功。
 
 ## 3. Provider 的 SSE 解析
 
@@ -74,15 +79,26 @@ pub enum FinishReason {
 当前适配器只请求一个 choice：
 
 - HTTP 非成功状态先返回错误；成功状态核对 `Content-Type: text/event-stream`（允许参数）。
-- SSE 注释/心跳与空 data 不产生文本；`choices: []` 的统计包不结束 Turn。
+- SSE 注释/心跳与空 data 不产生文本；`choices: []` 的统计包不结束模型步骤。
 - choice 0 的 `delta.content` 和 `delta.reasoning_content` 分别产生事件；同一个包有两者
-  时分别处理，不能使用互斥 `else if`。首版拒绝非零 choice、多候选和工具增量。
+  时分别处理，不能使用互斥 else if。工具参数增量独立累积；首版拒绝非零 choice、
+  多候选、非零 tool index 和 legacy function_call。
 - 先处理包内 Delta，再记录 `finish_reason`。没有内容的终止包不报“空回复”。
 - 严格完成策略：收到合法 `finish_reason` 后继续消费统计包，直到 `[DONE]` 才输出一次
-  `Finished`，随后流结束。`[DONE]` 没有结束原因、EOF 缺少 `[DONE]`、结束原因重复或
+  Finished；ToolCalls 结束时先输出完整 ToolCall，再输出 Finished，随后流结束。
+  `[DONE]` 没有结束原因、EOF 缺少 `[DONE]`、结束原因重复或
   终止后继续输出正文均视为协议异常。其他供应商需要不同结束规则时在其 adapter 内明确支持。
 - 错误 JSON、API 错误对象、HTTP/body 读取错误均输出一次 Err 后结束，错误文案不含原始
   响应体、认证头或完整请求。禁止把失败事件序列转换为空字符串成功结果。
+
+工具增量由 `openai_chat/decoder.rs` 的 PendingToolCall 保存 id、name 和 arguments。
+name/arguments 片段按到达顺序拼接，arguments 在 DONE 时解析为 JSON；缺失 ID/名称、
+非法 JSON 或工具信息与结束原因不匹配都失败。后续 `id: ""` 不表示 ID 改变，应忽略；
+首次非空 ID 保存，相同非空 ID 接受，不同非空 ID 仍报错。跨模型步骤的重复 ID 则由
+Core 校验，不能在 Decoder 内用上一条模型流的状态判断。
+
+模块边界：`sse_transport.rs` 处理 HTTP/超时/字节分帧，`openai_chat/stream.rs` 连接传输
+与解码，`request.rs` 映射请求，`decoder.rs` 负责协议状态；不是把全部逻辑放在 lib.rs。
 
 选择严格完成是本项目的首版策略，不是所有 SSE 服务的通用要求。请求发起至响应头使用
 30 秒超时，每次等待下一个 body chunk 使用 120 秒空闲超时；不是整个回答限时 120 秒，
@@ -91,25 +107,24 @@ pub enum FinishReason {
 
 ## 4. Session 并发、顺序与背压
 
-后台模型任务由 `JoinSet<()>` 管理。每轮创建独占的
-有界 ModelEvent 通道（容量 32）；任务逐条转发 Stream，发送 Finished/Err 后立即
-返回。发送端只由该任务持有，不留在 actor 或其他 clone 中。
+每个 Turn 的 `run_turn` 任务由 `JoinSet<Result<TurnOutput, TurnError>>` 管理，使用独占的
+有界 TurnProgress 通道（容量 32）。任务处理多个模型步骤，进度发送端只由该任务持有。
+actor 的 ActiveTurn 只保存接收端；正文和每一步结束原因由 run_turn 管理。它维护历史
+副本，不直接修改权威历史，也不把完整回答再次发送给 TUI。
 
-actor 保存 `ActiveTurn`：receiver、回答缓冲和待确认 outcome；思考缓冲在阶段 A 仅预留。
-网络任务不修改历史，不把完整回答再次发送给 TUI。阶段 A 的事件状态转换如下：
-
-| 输入 | actor 行为 |
+| 输入 | 处理位置与行为 |
 | --- | --- |
 | 有效 SubmitPrompt | 记录 User，发 UserMessageAdded、AssistantMessageStarted，启动本轮任务 |
-| TextDelta | 追加正文缓冲，发布 AssistantTextDelta；仍为 Running |
-| ReasoningDelta | 记录不支持的响应错误，关闭接收端并中止模型任务；排空后统一失败 |
-| Finished / Err | 保存 outcome，仍为 Running，等待内部通道关闭 |
-| 通道关闭 | 回收本轮 task，校验无 panic 且 outcome 存在，再统一提交成功或失败 |
+| TurnProgress::TextDelta | 发布 AssistantTextDelta；仍为 Running |
+| ToolStarted / ToolFinished | 发布工具事件；完成步骤写入前缀/调用/结果，仍为 Running |
+| 模型 Finished(ToolCalls) | run_turn 执行工具并再次调用模型，不结束 Turn |
+| ReasoningDelta / Provider Err | run_turn 返回错误并释放流；此前进度排空后统一失败 |
+| 通道关闭 | 回收本轮 task，依据 TurnOutput/TurnError 或 JoinError 提交成功/失败 |
 | Running 时再次提交 | CommandRejected；不改当前缓冲、状态或历史 |
 | Shutdown / UI 消失 | 中止任务、丢弃活跃流并关闭 Session；不自动重试 |
 
 **不能用 task 提前完成作为 TurnCompleted 的依据。** 通道关闭时此前 Delta 已按 FIFO
-读完，再检查 task 和 outcome，避免最后一段丢失、终态越过 Delta 或污染下一轮。每轮使用
+读完，再检查 task 返回值，避免最后一段丢失、终态越过 Delta 或污染下一轮。每轮使用
 新通道，上一轮完全回收前不接受下一轮；以后允许重叠/取消重启时再引入 TurnId。
 
 Core → UI 仍使用有界通道，完整保留文本事件，不用 `try_send` 丢 Delta，也不改成无限队列。
@@ -125,6 +140,7 @@ actor 的主 select 和每一次事件发送均监听关闭；外部 AgentComman
 
 ```text
 UserMessageAdded → AssistantMessageStarted
+→ [AssistantTextDelta（可选）、ToolCallStarted、ToolCallFinished]（零到多组）
 → 一个或多个 AssistantTextDelta
 → TurnCompleted
 ```
@@ -132,10 +148,12 @@ UserMessageAdded → AssistantMessageStarted
 阶段 B 才增加零到多个 `AssistantReasoningDelta`；它目前不在 `CoreEvent` 中。
 接入后不依赖所有服务严格“先思考、后正文”，两类事件分别累积即可。
 
-首版只有 `Stop` 且回答不为空才算成功。`Length`、`ContentFilter`、不支持的响应、空回答、
+首版只有最终模型步骤以 Stop 结束且回答非空才算 Turn 成功；ToolCalls 表示继续执行。
+Length、ContentFilter、不支持的响应、空最终回答、非法 ID、工具轮数超限、
 中断、超时或 task panic 均发一个 `TurnFailed`，保留 UI 已显示片段并标注中断，但不将失败
-Assistant 写入请求历史。对应 User 沿用当前规则保留；下一次请求可能包含连续 User，暂不
-实现回滚或自动重试。未来支持带终态的不完整历史时另改该契约。
+步骤的部分 Assistant 写入请求历史。对应 User、此前完成工具步骤及其 Assistant 前缀
+保留；工具执行错误也作为 ToolResult 保留并继续交给模型。暂不回滚或自动重试。
+未来支持带终态的不完整历史时另改该契约。
 
 成功时只把缓冲写入历史一次，不再次发整段 TextDelta。Thinking 不是新 MessageRole，
 不能将其并入回答。阶段 C 增加 `SessionMessage.reasoning: Option<String>`；User/System
@@ -187,18 +205,18 @@ Tokio interval 使用 `MissedTickBehavior::Skip`，结束/失败可强制刷新�
 
 ## 8. 日志、安全与测试
 
-默认日志只记录模型、事件类别、长度、耗时、结束原因和错误类别，不记录请求/响应正文。
-流式请求路径只记录元数据，不启用旧实现的整个 `ChatRequest` trace 输出；后续阶段同样
-遵守此边界。Thinking 的显示权限不等于日志落盘权限。显式正文诊断以后单独设计，
-API key 在任何级别都禁止记录。
+日志契约要求只记录必要元数据，不记录请求/响应正文；Thinking 的显示权限不等于日志
+落盘权限，API key 在任何级别都禁止记录。Provider 流路径没有整段 ChatRequest trace，
+但 TUI 提交分支仍有输入原文的 TRACE：启用全局 trace 或 vortex_tui=trace 会记录 Prompt。
+这属于待修正差异，不能宣称全链路已满足脱敏要求，也不应为排障默认开启正文诊断。
 模型文本不执行、不作为命令，控制字符过滤仍是独立工作，不能声称 SSE/Markdown 已提供防护。
 
 下表是验收目标，Thinking 与节流相关用例随对应阶段补齐，不表示已有这些能力或完整覆盖。
 
 | 层 | 必须验证 |
 | --- | --- |
-| Provider | 按任意字节拆包、中文跨包、CRLF/多行 data、同包多事件、空统计包、双字段 delta、坏 JSON、错误对象、缺 DONE、非成功 HTTP |
-| Core | 第一段先于请求结束到达；最后 Delta 不丢；只发一个终态；历史不重复；部分失败不进历史；第二轮顺序正确 |
+| Provider | 任意字节拆包、中文跨包、多行 data、统计包、双字段 delta、坏 JSON、缺 DONE、非成功 HTTP；工具参数拼接与空 ID 兼容 |
+| Core | 首段提前到达、最后 Delta 不丢、只发一个 Turn 终态；工具结果回填、轮数/ID 校验；失败部分正文不进历史，完成工具步骤保留 |
 | 生命周期 | 正文前/Thinking 中/输出中 Shutdown；UI 通道满时退出；task panic；事件消费者关闭；读流超时 |
 | TUI | 思考与回答分离、只有思考时失败仍保留、Markdown 围栏跨 delta、手动滚动不自动跳底、定时刷新和终态末帧 |
 | 阶段 C | 第二轮正确回传独立 reasoning；User/System 无该字段；Snapshot 保留；日志无正文/密钥 |

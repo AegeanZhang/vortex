@@ -1,6 +1,6 @@
 # TUI 接口设计
 
-本文档以文本流式接口为基线，说明 `vortex-tui` 如何消费
+本文档以文本流式和工具状态接口为基线，说明 `vortex-tui` 如何消费
 `vortex-core::SessionConnection`。Session actor 和 Provider 调用链见
 [`session-runtime.md`](session-runtime.md)，技术选型见
 [`../research/rust-tui-research.md`](../research/rust-tui-research.md)。
@@ -11,7 +11,7 @@
 界面状态和渲染。它依赖 Core 的语义类型，但不持有具体 Provider，不构造模型请求，也不
 保存权威会话历史。
 
-- CLI 读取环境变量、装配 Provider、启动 Session，再把连接交给 TUI。
+- CLI 读取环境变量、装配 Provider 和 ToolRegistry、启动 Session，再把连接交给 TUI。
 - Core 保存对话事实、执行 Turn 并发布 `CoreEvent`。
 - TUI 保存 Prompt、Transcript、notice 和用于展示的 Session 状态。
 - Ratatui、Crossterm 和 `ratatui-textarea` 类型不得进入 `vortex-core`。
@@ -105,17 +105,25 @@ Enter 在全局映射阶段转换为 `SubmitPrompt`，`PromptEditor::handle_inpu
 | `TurnCompleted` | 状态设为 `Idle`，清除 notice |
 | `TurnFailed` | 状态设为 `Failed`，清除 notice 并追加 Error entry |
 | `CommandRejected` | 只更新 notice，不改状态和 Transcript |
+| `ToolCallStarted` | notice 显示 Running tool 和名称，重绘；状态仍为 Running |
+| `ToolCallFinished` | notice 显示 Tool completed/failed 并等待模型，重绘；不新增 Transcript entry |
 
 Turn 失败时，如果最后一项是空 Assistant 占位，`Transcript::fail_assistant` 会先删除它；
 如果已存在部分回复，则保留部分内容并另加 Error entry。Snapshot 转换会恢复 User 和
 Assistant 消息，System 消息当前不显示。
 
+一个 Turn 的多个模型步骤共用一条 Assistant entry，步骤前缀与最终正文直接累积；尚未
+按工具步骤拆分展示或加入结果卡片。工具错误结果不等于 TurnFailed，模型仍可能继续回答。
+AssistantTextDelta 当前不清除工具 notice，它在编辑输入、下一轮开始或 Turn 终态时更新/
+清除，不能把 waiting for model 当作精确的模型阶段状态。工具执行规则见
+[Agent loop](agent-loop.md)。
+
 ## Event loop 与绘制
 
 `run(...).await` 在调用它的异步任务中进入 `run_event_loop`；后台 Session loop 已由
 `start_session` 通过 `tokio::spawn` 启动，两者并发运行。TUI 不只是命令生产者，还消费
-Session 返回的 CoreEvent；Session 不只是命令消费者，还负责发布会话事件。每轮模型
-请求另有短生命周期的任务，完整启动与调用路径见
+Session 返回的 CoreEvent；Session 不只是命令消费者，还负责发布会话事件。每个 Turn
+另有短生命周期的 run_turn 任务，它可串行发起多个模型请求与工具执行，完整路径见
 [`Session：启动顺序与三个执行角色`](session-runtime.md#启动顺序与三个执行角色)。
 
 Event loop 使用 `tokio::select!` 等待 `EventStream` 和 `CoreEventStream`。Action 经过
@@ -145,6 +153,7 @@ widget 的确定性状态，不通过真实键盘或真实 Provider 制造条件
 | `app.rs` | Quit | `Shutdown` 位于 `Exit` 之前 |
 | 同上 | 空输入、正常提交、Running 时提交 | 是否保留输入、发送命令和设置 notice 均正确 |
 | 同上 | 每一种 `CoreEvent` | status、notice、Transcript 与 Redraw 一致 |
+| 同上 | 工具开始、成功/错误结果 | 只改变 notice；仍 Running，不新增 Transcript entry |
 | `widgets/transcript.rs` | 多段 delta | 内容追加到同一 Assistant entry |
 | 同上 | 失败前无内容/已有部分内容 | 分别删除空占位/保留部分回复，并追加 Error |
 | 同上 | Snapshot 投影 | User/Assistant 保留，System 隐藏，顺序不变 |
@@ -165,7 +174,7 @@ fake Session/channel，禁止访问真实模型服务。
 - `CancelTurn`；未来 `Ctrl+C` 在 Running 时应先取消，Idle 时才退出。
 - Thinking 展示与跨事件重绘节流，目标见 [`streaming-response.md`](streaming-response.md)；
   Provider 文本流已通过现有 `AssistantTextDelta` 接口投影，无需 TUI 解析 SSE。
-- 终端 resize 主动触发重绘、工具状态、审批弹窗、多行提交策略和会话恢复。
+- 终端 resize 主动触发重绘、工具详情/来源卡片、审批弹窗、多行提交策略和会话恢复。
 - 模型文本的终端控制字符过滤。
 
 会话能力先扩展 Core 的语义契约，再投影到 TUI；纯展示、输入和滚动能力留在 TUI。

@@ -32,7 +32,7 @@ struct ToolCallDelta {
     index: u32,
     id: Option<String>,
     #[serde(rename = "type")]
-    kind:Option<String>,
+    kind: Option<String>,
     function: Option<FunctionDelta>,
 }
 
@@ -105,7 +105,7 @@ impl OpenAiChatDecoder {
                             call_id,
                             name: pending.name,
                             arguments,
-                        }
+                        },
                     });
                 }
                 _ if self.pending_tool_call.is_some() => {
@@ -195,13 +195,13 @@ impl OpenAiChatDecoder {
         if let Some(delta) = reasoning_content
             && !delta.is_empty()
         {
-            events.push(ModelEvent::ReasoningDelta { delta });            
+            events.push(ModelEvent::ReasoningDelta { delta });
         }
 
         if let Some(delta) = content
             && !delta.is_empty()
         {
-            events.push(ModelEvent::TextDelta { delta });            
+            events.push(ModelEvent::TextDelta { delta });
         }
 
         self.finish_reason = finish_reason;
@@ -221,7 +221,7 @@ impl OpenAiChatDecoder {
             ))
         }
     }
-    
+
     // 累积函数，把多个SSE chunk 中零散的Tool call信息累积到 OpenAiChatDecoder.pending_tool_call
     fn push_tool_call_delta(&mut self, delta: ToolCallDelta) -> Result<(), ProviderError> {
         if delta.index != 0 {

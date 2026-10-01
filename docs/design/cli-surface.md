@@ -95,7 +95,9 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 
 ## 分阶段落地
 
-阶段划分对应 `../architecture/overview.md` 中的 crate 落地顺序。
+以下阶段是目标能力分组，不是当前实现清单；实现顺序可按学习需要调整，crate 边界以
+[`架构总览`](../architecture/overview.md) 为准。当前 TUI 已复用 Session 与 Mock 工具循环，
+exec 仍是旧非流式 HTTP 路径，不能从下表推断其已经具备工具、stdin 或 JSON 事件能力。
 
 | 阶段 | 本文档中落地的部分 |
 | --- | --- |
@@ -103,7 +105,8 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 | 2 工具与沙箱 | `--approval`、`--sandbox`、两个别名、退出码 3、`-C`、`-c` |
 | 3 交互 | 默认 TUI、`resume` 全部形态、`--last` / `--list`、`--color` 开关、退出码 130 |
 
-阶段 1 只实现 `exec`，但**参数命名与语义按本文档的最终形态定义**，后续阶段只填充实现，不改动已发布的参数名。
+参数命名与语义按本文档的最终形态定义。源码中已解析但未生效的参数（如当前 `-c`）
+不是已支持的配置能力，运行用法以 [上手指南](../guide/getting-started.md) 为准。
 
 ## 测试要求
 

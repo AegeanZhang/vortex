@@ -14,7 +14,37 @@
 
 首版只要求文本内容；图片、文件和音频以后通过扩展内容类型加入。本文档不定义 HTTP、流式传输、工具审批和会话文件格式的实现细节。
 
-## 三层模型
+## 工具版 v1 的基线契约
+
+当前跨 crate 请求使用以下最小形状，来源分别是 `vortex-core/src/provider.rs` 和
+`conversation.rs`：
+
+```rust
+pub struct ModelRequest {
+    pub items: Vec<ConversationItem>,
+    pub tools: Vec<ToolSpec>,
+}
+
+pub enum ConversationItem {
+    Message(SessionMessage),
+    ToolCall(ToolCall),
+    ToolResult(ToolResult),
+}
+```
+
+SessionMessage 仍是 role/content 文本，调用 ID 仍是 String，参数是结构化 JSON。
+Session 保存完整内存历史，run_turn 按原顺序克隆历史并带上注册表的工具定义；还没有
+独立 ContextAssembler、Instruction、Token 预算、摘要或 JSONL 事件回放。
+
+每个工具步骤按 Assistant 前缀（如有）、ToolCall、ToolResult 的顺序回填；最终成功回答
+另写一次，后续失败不撤销已经完成的工具步骤。ToolRegistry 将工具错误转换为结果，
+参数由工具实现手动校验，尚无通用 Schema 验证器。执行前拒绝空白和历史/本轮重复 ID。
+完整执行与测试契约见 [Agent loop](agent-loop.md)。
+
+下文的三层模型、扩展类型和 ContextAssembler 是后续目标，不应按示例字段访问当前
+ModelRequest；进度与验证边界以根 README 为准。
+
+## 三层模型（目标）
 
 | 层次 | 作用 | 持久化 | 是否含 Provider 细节 |
 | --- | --- | --- | --- |
@@ -22,7 +52,9 @@
 | `ConversationItem` | 从事件重建出的完整语义项，供上下文选择 | 可由事件重建 | 否 |
 | Wire request | OpenAI Responses、Chat Completions 或 Anthropic 的请求体 | 默认不持久化 | 是 |
 
-事件是会话事实的唯一来源。消息构建器读取事件投影后的会话状态，不直接读取 JSONL，也不把 Provider 请求体当作会话状态保存。
+目标是以事件为会话事实来源，消息构建器读取事件投影后的状态，不直接读取 JSONL，
+也不把 Provider 请求体当作会话状态保存。v1 由 Session 直接维护 history；CoreEvent
+是 UI 通知，不是已具备完整回放能力的持久化事件（例如工具完成事件不携带 Assistant 前缀）。
 
 ```text
 CoreEvent / Session log
@@ -37,9 +69,9 @@ ModelRequest
 Provider wire request
 ```
 
-## 核心数据模型
+## 扩展数据模型（目标）
 
-以下类型表示语义要求，具体字段可在实现时按 Rust 所有权和序列化需要调整：
+以下类型表示后续语义要求，不是当前 Rust 类型定义；具体字段可按所有权和序列化需要调整：
 
 ```rust
 pub struct ModelRequest {

@@ -22,9 +22,9 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 单个子系统的对外契约，是写代码时的直接依据。
 
-理解文本流式 TUI 时，建议依次阅读 `session-runtime.md`、`streaming-response.md`、
-`tui-interface.md` 和 `message-building.md`：先看运行时与流协议，再看界面投影，最后看
-后续上下文构建目标。
+理解工具版 TUI 时，建议依次阅读 `session-runtime.md`、`agent-loop.md`、
+`streaming-response.md`、`tui-interface.md` 和 `message-building.md`：先看调度与工具循环，
+再看协议和界面投影，最后区分最小请求模型与后续上下文构建目标。
 
 - [`design/cli-surface.md`](design/cli-surface.md) —— `vortex` 命令行接口：模式、参数、输出契约、退出码，以及各部分归属哪个落地阶段。
 
@@ -41,6 +41,10 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 - [`design/streaming-response.md`](design/streaming-response.md) —— SSE 增量接口与任务终态，以及后续 Thinking 展示/历史策略和绘制节流。
 
   **什么时候查**：理解流式 Provider、增加思考显示或验证流中断与退出时。
+
+- [`design/agent-loop.md`](design/agent-loop.md) —— 工具版 v1 的 Tool/Registry、模型与工具循环、历史回填、ID/轮数限制、Mock 搜索与测试契约。
+
+  **什么时候查**：阅读 run_turn、接入真实工具，或补充工具调用与多步失败测试时。
 
 - [`design/message-building.md`](design/message-building.md) —— 会话事件如何形成模型上下文，以及 Tool call、Token 预算和 Provider 映射规则。
 
@@ -80,9 +84,10 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 ## 两条约定
 
-**文档只写设计与约定，不写进度。** 当前完成到哪一步以仓库根目录的 `README.md` 为准，
+**设计文档区分基线契约与后续目标，不维护独立进度表。** 当前完成到哪一步及验证结果
+以仓库根目录的 `README.md` 为准，
 各实验的进度记录在自己的计划文档里（如 `playground/tui-demo/docs/implementation-plan.md`）。
-把状态叙述写进设计文档，过期后会主动误导读者。
+描述代码接口时同步相关设计，并明确标注未实现的目标类型，避免把规划误当成现有 API。
 
 **用户手册只写实际验证过的内容。** 尚未实现的命令属于设计，写在 `design/` 下并标明目标形态，
 不要写进手册——手册描述不存在的行为，比没有手册更糟。

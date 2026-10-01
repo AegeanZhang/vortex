@@ -1,10 +1,4 @@
-use std::{
-    collections::BTreeSet,
-    error::Error,
-    fmt,
-    pin::Pin,
-    sync::Arc,
-};
+use std::{collections::BTreeSet, error::Error, fmt, pin::Pin, sync::Arc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolSpec {
@@ -50,8 +44,7 @@ impl fmt::Display for ToolError {
 
 impl Error for ToolError {}
 
-pub type ToolFuture<'a> = 
-    Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + 'a>>;
+pub type ToolFuture<'a> = Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + 'a>>;
 
 pub trait Tool: Send + Sync {
     fn spec(&self) -> ToolSpec;
@@ -90,9 +83,7 @@ impl ToolRegistry {
     }
 
     pub async fn execute(&self, call: &ToolCall) -> ToolResult {
-        let tool = self
-            .tools.iter()
-            .find(|tool| tool.spec().name == call.name);
+        let tool = self.tools.iter().find(|tool| tool.spec().name == call.name);
 
         let outcome = match tool {
             Some(tool) => tool.execute(call.arguments.clone()).await,

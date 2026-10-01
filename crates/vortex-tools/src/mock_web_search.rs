@@ -49,7 +49,7 @@ impl Tool for MockWebSearch {
                     "title": "Mock search result",
                     "url": "https://example.invalid/result-1",
                     "snippet": "This is deterministic mock data."
-                }]   
+                }]
             })
             .to_string())
         })

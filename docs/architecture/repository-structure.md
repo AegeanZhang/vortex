@@ -31,6 +31,19 @@ vortex/
 
 `vortex-core` 的目标模块包括事件模型、Agent loop、消息历史、会话、配置、项目指令、Provider/Tool trait、审批策略与错误类型。其他 crate 的内部模块应在真实职责出现后再拆分，不一次性创建空目录和占位实现。
 
+## 执行链路的模块入口
+
+| crate | 阅读入口 |
+| --- | --- |
+| vortex-core | `conversation.rs` 语义历史、`provider.rs` 模型接口、`tool.rs` 工具接口与注册表、`agent_loop.rs` 多步执行、`session.rs` actor |
+| vortex-provider | `openai_chat/mod.rs` 装配、`request.rs` 请求映射、`decoder.rs` 增量组装、`stream.rs` 流连接；`sse_transport.rs` 负责传输 |
+| vortex-tools | `mock_web_search.rs` 固定搜索结果，不调用真实服务 |
+| vortex-cli | `main.rs` Provider/Tool 装配、`logging.rs` 日志；`exec.rs` 是待迁移的旧单次路径 |
+| vortex-tui | `event_loop.rs` 与 `app.rs` 消费 CoreEvent，`widgets/` 渲染局部状态 |
+
+历史、执行与 wire 请求之间的边界见 [Session](../design/session-runtime.md) 和
+[Agent loop](../design/agent-loop.md)；目录入口不表示配置、权限等目标模块已经实现。
+
 ## Workspace 约定
 
 - 根 Workspace 使用 `members = ["crates/*"]`、`default-members = ["crates/*"]` 和 `exclude = ["playground"]`；根目录的 `--workspace` 只覆盖产品 crate。
