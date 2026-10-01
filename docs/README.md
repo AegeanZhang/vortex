@@ -62,6 +62,8 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 技术选型与外部对照，回答"这个取舍为什么是这样"。
 
+- [`research/README.md`](research/README.md) —— 调研文档入口，按 Agent、TUI、CLI 与配置主题索引现有调研。
+- [`research/web-search-research.md`](research/web-search-research.md) —— Web Search 服务形态、国内外候选、Codex/Claude Code 对照，以及 Vortex 的接入边界与首版建议。
 - [`research/rust-tui-research.md`](research/rust-tui-research.md) —— TUI 技术选型，结论是 Ratatui + Crossterm + Tokio。
 - [`research/tui-layout-and-input-research.md`](research/tui-layout-and-input-research.md) —— Codex/Claude Code 屏幕模式与输入交互对照，以及 Vortex slash 菜单、多行输入和粘贴方案。
 - [`research/transcript-markdown-research.md`](research/transcript-markdown-research.md) —— Markdown 渲染库选型、Codex/Claude Code 实现对照，以及 Transcript 排版、滚动和流式展示的候选方案。

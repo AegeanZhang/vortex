@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 vortex-core.workspace = true
 vortex-provider.workspace = true
+vortex-tools.workspace = true
 vortex-tui.workspace = true
 
 clap.workspace = true

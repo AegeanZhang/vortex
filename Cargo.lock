@@ -2491,6 +2491,7 @@ dependencies = [
  "tracing-subscriber",
  "vortex-core",
  "vortex-provider",
+ "vortex-tools",
  "vortex-tui",
 ]
 
@@ -2499,6 +2500,7 @@ name = "vortex-core"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "serde_json",
  "tokio",
  "tracing",
 ]
@@ -2525,6 +2527,10 @@ version = "0.1.0"
 [[package]]
 name = "vortex-tools"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "vortex-core",
+]
 
 [[package]]
 name = "vortex-tui"

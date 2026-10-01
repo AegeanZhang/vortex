@@ -125,6 +125,18 @@ pub(crate) fn update(state: &mut AppState, action: UiAction) -> Vec<Effect> {
             state.notice = Some(message);
             vec![Effect::Redraw]
         }
+        UiAction::CoreEvent(CoreEvent::ToolCallStarted { call }) => {
+            state.notice = Some(format!("Running tool: {}", call.name));
+            vec![Effect::Redraw]
+        }
+        UiAction::CoreEvent(CoreEvent::ToolCallFinished { name, result }) => {
+            state.notice = Some(if result.is_error {
+                format!("Tool failed: {name}; waiting for model")
+            } else {
+                format!("Tool completed: {name}; waiting for model")
+            });
+            vec![Effect::Redraw]
+        }
         UiAction::ScrollTranscript(command) => {
             match command {
                 ScrollCommand::PageUp => state.transcript.page_up(),

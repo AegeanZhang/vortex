@@ -5,8 +5,9 @@ use clap::{Parser, Subcommand};
 use exec::execute;
 use std::{env, error::Error, sync::Arc};
 
-use vortex_core::start_session;
+use vortex_core::{Tool, ToolRegistry, start_session};
 use vortex_provider::{OpenAiChatProvider, QwenThinkingOptions};
+use vortex_tools::MockWebSearch;
 use vortex_tui::options::TuiOptions;
 use vortex_tui::run;
 
@@ -75,7 +76,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 }),
             );
 
-            let connection = start_session(provider);
+            let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(MockWebSearch::new())];
+            let tools = ToolRegistry::new(tools)?;
+
+            let connection = start_session(provider, tools);
             let tui_options = TuiOptions { color: None };
 
             run(connection, tui_options).await?;

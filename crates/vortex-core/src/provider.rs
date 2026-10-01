@@ -1,17 +1,22 @@
-//use std::{error::Error, fmt, future::Future, pin::Pin};
-use crate::SessionMessage;
-use futures_util::Stream;
 use std::{error::Error, fmt, pin::Pin};
 
+use futures_util::Stream;
+
+use crate::{ConversationItem, ToolCall, ToolSpec};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FinishReason {
     Stop,
+    ToolCalls,
     Length,
     ContentFilter,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelEvent {
     TextDelta { delta: String },
     ReasoningDelta { delta: String },
+    ToolCall { call: ToolCall },
     Finished { reason: FinishReason },
 }
 
@@ -20,7 +25,9 @@ pub type ModelStream =
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelRequest {
-    pub messages: Vec<SessionMessage>,
+    //pub messages: Vec<SessionMessage>,
+    pub items: Vec<ConversationItem>,
+    pub tools: Vec<ToolSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,12 +54,6 @@ impl fmt::Display for ProviderError {
 }
 
 impl Error for ProviderError {}
-
-/*
-    pub trait ModelProvider: Send + Sync {
-    fn complete(&self, request: ModelRequest) -> ProviderFuture<'_>;
-}
-*/
 
 pub trait ModelProvider: Send + Sync {
     fn stream(&self, request: ModelRequest) -> ModelStream;

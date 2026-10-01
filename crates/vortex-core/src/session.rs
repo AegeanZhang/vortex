@@ -1,24 +1,12 @@
-use futures_util::StreamExt;
 use std::sync::Arc;
 use tokio::sync::watch;
 use tracing::info;
 
 use crate::{
-    FinishReason, ModelEvent, ModelProvider, ModelRequest, ProviderError,
+    ConversationItem, MessageRole, ModelProvider, SessionMessage, ToolCall,
+    ToolRegistry, ToolResult,
+    agent_loop::{TurnError, TurnOutput, TurnProgress, run_turn},
 };
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionMessage {
-    pub role: MessageRole,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MessageRole {
-    User,
-    Assistant,
-    System,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionStatus {
@@ -70,6 +58,8 @@ pub enum CoreEvent {
     TurnCompleted,
     TurnFailed { message: String },
     CommandRejected { message: String },
+    ToolCallStarted { call: ToolCall },
+    ToolCallFinished { name: String, result: ToolResult },
 }
 
 #[derive(Clone)]
@@ -111,17 +101,23 @@ impl CoreEventStream {
     }
 }
 
+/*
 struct ActiveTurn {
     receiver: tokio::sync::mpsc::Receiver<Result<ModelEvent, ProviderError>>,
     content: String,
     reasoning: String,
     outcome: Option<Result<FinishReason, ProviderError>>,
 }
+*/
+struct ActiveTurn {
+    receiver: tokio::sync::mpsc::Receiver<TurnProgress>,
+}
 
 enum RuntimeInput {
     Shutdown,
     Command(Option<AgentCommand>),
-    Model(Option<Result<ModelEvent, ProviderError>>),
+    //Model(Option<Result<ModelEvent, ProviderError>>),
+    Turn(Option<TurnProgress>),
     ConsumerClosed,
 }
 
@@ -148,7 +144,10 @@ async fn publish_event(
     }
 }
 
-pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
+pub fn start_session(
+    provider: Arc<dyn ModelProvider>,
+    tools: ToolRegistry,
+) -> SessionConnection {
     info!("Session runtime starting");
 
     let (command_sender, mut command_receiver) = tokio::sync::mpsc::channel::<AgentCommand>(32);
@@ -157,14 +156,19 @@ pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
     let (shutdown_sender, mut shutdown_receiver) = watch::channel(false);
 
     tokio::spawn(async move {
-        let mut messages = Vec::<SessionMessage>::new();
+        let mut history = Vec::<ConversationItem>::new();
         let mut status = SessionStatus::Idle;
+        let mut turns =
+            tokio::task::JoinSet::<Result<TurnOutput, TurnError>>::new();
+        let mut active: Option<ActiveTurn> = None;
+
+        //let mut messages = Vec::<SessionMessage>::new();
 
         // 任务只负责向通道转发事件，不再返回完整 String.
-        let mut turns = tokio::task::JoinSet::<()>::new();
+        //let mut turns = tokio::task::JoinSet::<()>::new();
 
         // 当前轮次的接收端、累积正文和待确认结果。
-        let mut active: Option<ActiveTurn> = None;
+        //let mut active: Option<ActiveTurn> = None;
 
         loop {
             // 处理进入等待之前就已经发生的关闭请求。
@@ -189,7 +193,8 @@ pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
                         .recv()
                         .await
                 }, if active.is_some() => {
-                    RuntimeInput::Model(item)
+                    //RuntimeInput::Model(item)
+                    RuntimeInput::Turn(item)
                 }
 
                 _ = event_sender.closed() => {
@@ -232,10 +237,16 @@ pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
                         continue;
                     }
 
+                    /*
                     messages.push(SessionMessage {
                         role: MessageRole::User,
                         content: content.clone(),
                     });
+                    */
+                    history.push(ConversationItem::Message(SessionMessage {
+                        role: MessageRole::User,
+                        content: content.clone(),
+                    }));
 
                     if !publish_event(
                         &event_sender,
@@ -259,8 +270,19 @@ pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
                         break;
                     }
 
+                    /*
                     let request = ModelRequest {
                         messages: messages.clone(),
+                    };
+                    */
+                    /*
+                    let request = ModelRequest {
+                        items: messages
+                            .iter()
+                            .cloned()
+                            .map(ConversationItem::Message)
+                            .collect(),
+                        tools: Vec::new(),
                     };
 
                     // 每轮都创建建独立通道
@@ -296,6 +318,24 @@ pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
                         // 退出时释放唯一 sender
                         // 如果流没有提供终态， actor 会检测出来。
                     });
+                    */
+                    let (turn_sender, turn_receiver) =
+                        tokio::sync::mpsc::channel::<TurnProgress>(32);
+
+                    active = Some(ActiveTurn {
+                        receiver: turn_receiver,
+                    });
+
+                    let provider = Arc::clone(&provider);
+                    let tools = tools.clone();
+                    let turn_history = history.clone();
+
+                    turns.spawn(run_turn(
+                        provider,
+                        tools,
+                        turn_history,
+                        turn_sender,
+                    ));
                 }
 
                 RuntimeInput::Shutdown
@@ -305,6 +345,7 @@ pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
                     break;
                 }
 
+                /*
                 RuntimeInput::Model(Some(item)) => {
                     let turn = active
                         .as_mut()
@@ -354,11 +395,65 @@ pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
                         }
                     }
                 }
+                */
 
-                RuntimeInput::Model(None) => {
+                RuntimeInput::Turn(Some(TurnProgress::TextDelta { delta })) => {
+                    if !publish_event(
+                        &event_sender,
+                        &mut shutdown_receiver,
+                        CoreEvent::AssistantTextDelta { delta },
+                    )
+                    .await
+                    {
+                        break;
+                    }
+                }
+
+                RuntimeInput::Turn(Some(TurnProgress::ToolStarted { call })) => {
+                    if !publish_event(
+                        &event_sender,
+                        &mut shutdown_receiver,
+                        CoreEvent::ToolCallStarted { call },
+                    )
+                    .await
+                    {
+                        break;
+                    }
+                }
+
+                RuntimeInput::Turn(Some(TurnProgress::ToolFinished {
+                    assistant_prefix,
+                    call,
+                    result,
+                })) => {
+                    if let Some(content) = assistant_prefix {
+                        history.push(ConversationItem::Message(SessionMessage {
+                            role: MessageRole::Assistant,
+                            content,
+                        }));
+                    }
+
+                    let name = call.name.clone();
+                    history.push(ConversationItem::ToolCall(call));
+                    history.push(ConversationItem::ToolResult(result.clone()));
+
+                    if !publish_event(
+                        &event_sender,
+                        &mut shutdown_receiver,
+                        CoreEvent::ToolCallFinished { name, result },
+                    )
+                    .await
+                    {
+                        break;
+                    }
+                }
+
+                //RuntimeInput::Model(None) => {
+                RuntimeInput::Turn(None) => {
                     // 通道已关闭且排队事件已消费完。
                     // take 会把 active 便会 None, 并交出本轮状态。
-                    let turn = active
+                    //let turn = active
+                    active
                         .take()
                         .expect("closed model channel requires an active turn");
 
@@ -379,11 +474,15 @@ pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
                             break;
                         }
 
-                        result = turns.join_next() => {
+                        /*result = turns.join_next() => {
                             result
+                        }*/
+                        joined = turns.join_next() => {
+                            joined
                         }
                     };
 
+                    /*
                     let result: Result<String, ProviderError> = match (joined, turn.outcome) {
                         (_, Some(Err(error))) => Err(error),
 
@@ -421,7 +520,9 @@ pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
                             "provider task is missing".to_string(),
                         )),
                     };
+                    */
 
+                    /*
                     let event = match result {
                         Ok(content) => {
                             // 成功回答只写入历史一次
@@ -441,6 +542,32 @@ pub fn start_session(provider: Arc<dyn ModelProvider>) -> SessionConnection {
 
                             CoreEvent::TurnFailed {
                                 message: error.to_string(),
+                            }
+                        }
+                    };
+                    */
+                    let event = match joined {
+                        Some(Ok(Ok(output))) => {
+                            history.push(ConversationItem::Message(output.assistant));
+                            status = SessionStatus::Idle;
+                            CoreEvent::TurnCompleted
+                        }
+                        Some(Ok(Err(error))) => {
+                            status = SessionStatus::Failed;
+                            CoreEvent::TurnFailed {
+                                message: error.to_string(),
+                            }
+                        }
+                        Some(Err(_)) => {
+                            status = SessionStatus::Failed;
+                            CoreEvent::TurnFailed {
+                                message: "turn task terminated unexpectedly".to_string(),
+                            }
+                        }
+                        None => {
+                            status = SessionStatus::Failed;
+                            CoreEvent::TurnFailed {
+                                message: "turn task is missing".to_string(),
                             }
                         }
                     };
@@ -486,15 +613,23 @@ mod tests {
     use tokio::sync::{mpsc, oneshot, watch};
 
     use crate::{
-        FinishReason, ModelEvent, ModelProvider, ModelRequest, ModelStream, ProviderError,
+        ConversationItem, FinishReason, MessageRole, ModelEvent, ModelProvider, 
+        ModelRequest, ModelStream, ProviderError, SessionMessage, ToolRegistry,
     };
 
     use super::{
-        AgentCommand, AgentHandle, CoreEvent, CoreEventStream, MessageRole, SessionConnection,
-        SessionMessage, publish_event, start_session,
+        AgentCommand, AgentHandle, CoreEvent, CoreEventStream, SessionConnection,
+        publish_event, start_session,
     };
 
     type ModelItem = Result<ModelEvent, ProviderError>;
+
+    fn message(role: MessageRole, content: &str) -> ConversationItem {
+        ConversationItem::Message(SessionMessage {
+            role,
+            content: content.to_string(),
+        })
+    }
 
     async fn within<T>(future: impl Future<Output = T>) -> T {
         tokio::time::timeout(Duration::from_secs(5), future)
@@ -590,7 +725,7 @@ mod tests {
 
         let SessionConnection {
             agent, mut events, ..
-        } = start_session(provider.clone());
+        } = start_session(provider.clone(), ToolRegistry::empty());
 
         begin_turn(&agent, &mut events, "你好").await;
 
@@ -615,11 +750,13 @@ mod tests {
         let requests = provider.requests();
         assert_eq!(requests.len(), 1);
         assert_eq!(
-            requests[0].messages,
+            /* requests[0].messages,
             vec![SessionMessage {
                 role: MessageRole::User,
                 content: "你好".to_string(),
-            }],
+            }],*/
+            requests[0].items,
+            vec![message(MessageRole::User, "你好")],
         );
 
         close_session(&agent, &mut events).await;
@@ -634,7 +771,7 @@ mod tests {
 
         let SessionConnection {
             agent, mut events, ..
-        } = start_session(provider.clone());
+        } = start_session(provider.clone(), ToolRegistry::empty());
 
         begin_turn(&agent, &mut events, "第一问").await;
 
@@ -665,7 +802,7 @@ mod tests {
         let requests = provider.requests();
         assert_eq!(requests.len(), 2);
         assert_eq!(
-            requests[1].messages,
+            /*requests[1].messages,
             vec![
                 SessionMessage {
                     role: MessageRole::User,
@@ -679,6 +816,12 @@ mod tests {
                     role: MessageRole::User,
                     content: "第二问".to_string(),
                 },
+            ],*/
+            requests[1].items,
+            vec![
+                message(MessageRole::User, "第一问"),
+                message(MessageRole::Assistant, "Hello world"),
+                message(MessageRole::User, "第二问"),
             ],
         );
 
@@ -699,7 +842,7 @@ mod tests {
 
         let SessionConnection {
             agent, mut events, ..
-        } = start_session(provider.clone());
+        } = start_session(provider.clone(), ToolRegistry::empty());
 
         begin_turn(&agent, &mut events, "第一问").await;
 
@@ -731,7 +874,7 @@ mod tests {
 
         let requests = provider.requests();
         assert_eq!(
-            requests[1].messages,
+            /*requests[1].messages,
             vec![
                 SessionMessage {
                     role: MessageRole::User,
@@ -741,6 +884,11 @@ mod tests {
                     role: MessageRole::User,
                     content: "再试一次".to_string(),
                 },
+            ],*/
+            requests[1].items,
+            vec![
+                message(MessageRole::User, "第一问"),
+                message(MessageRole::User, "再试一次"),
             ],
         );
 
@@ -802,7 +950,7 @@ mod tests {
 
         let SessionConnection {
             agent, mut events, ..
-        } = start_session(provider);
+        } = start_session(provider, ToolRegistry::empty());
 
         begin_turn(&agent, &mut events, "你好").await;
         within(started).await.expect("模型流没有启动");
@@ -848,7 +996,7 @@ mod tests {
 
         let SessionConnection {
             agent, mut events, ..
-        } = start_session(provider);
+        } = start_session(provider, ToolRegistry::empty());
 
         begin_turn(&agent, &mut events, "你好").await;
         within(started).await.expect("模型流没有启动");
@@ -871,7 +1019,7 @@ mod tests {
 
         let SessionConnection {
             agent, mut events, ..
-        } = start_session(provider);
+        } = start_session(provider, ToolRegistry::empty());
 
         begin_turn(&agent, &mut events, "你好").await;
         within(started).await.expect("模型流没有启动");
