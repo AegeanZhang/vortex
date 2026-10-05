@@ -1,4 +1,4 @@
-# Agent loop 与 Mock 工具设计
+# Agent loop 与搜索工具设计
 
 本文描述工具版 v1 的执行契约。运行时所有权见 [Session](session-runtime.md)，流式协议见
 [SSE](streaming-response.md)，完整上下文构建目标见 [Message](message-building.md)。
@@ -17,10 +17,12 @@ v1 串行执行：每个模型步骤最多一个 ToolCall，每个 Turn 最多�
 | `vortex-core/src/session.rs` | 命令串行化、权威历史、进度事件投影和 Turn 收尾 |
 | `vortex-provider/src/openai_chat/` | 请求映射、SSE 工具增量组装；不执行工具 |
 | `vortex-tools/src/mock_web_search.rs` | 固定搜索结果，用于验证执行路径 |
+| `vortex-tools/src/metaso_web_search.rs` 及子模块 | 秘塔 HTTP 搜索、请求/响应映射与工具内边界限制 |
 | `vortex-cli/src/main.rs` | 具体 Provider/Tool 装配；TUI 不认识它们 |
 
-v1 不接入 Tavily，不实现并行工具、审批、沙箱、工具超时、通用 JSON Schema 校验、输出
-截断或总 Token 预算。模型请求仍访问真实 Qwen 服务；只有搜索工具的数据是 Mock。
+Mock v1 是最初的闭环基线；当前 CLI 默认注册秘塔工具，复用同一执行契约，不接入 Tavily。
+仍不实现并行工具、审批、沙箱、通用 JSON Schema 校验、注册表统一超时或总 Token 预算。
+秘塔工具单独实现参数校验、请求超时与输出限制；不能把这些推断为所有 Tool 都已受治理。
 
 ## 工具接口与注册表
 
@@ -59,10 +61,42 @@ pub trait Tool: Send + Sync {
 未知工具、参数错误和执行错误统一转换为保留原 `call_id` 的错误 ToolResult，不直接结束
 Turn。工具只处理参数，不负责生成调用 ID；注册表不自动执行 Schema 校验。
 
+### Mock 搜索（保留的闭环基线）
+
 `MockWebSearch` 注册名为 `web_search`，Schema 要求字符串 `query`。实现手动检查该字段
 并去除首尾空白，拒绝空查询；没有校验 Schema 的所有规则（如额外字段）。成功输出包含
 `mock: true`、规范化后的查询和一条固定结果，URL 为 `https://example.invalid/result-1`。
-它不会因查询变化而检索网页，不代表真实搜索服务已经可用。
+它不会因查询变化而检索网页，也不代表模型侧托管搜索。CLI 默认不注册 Mock，不能与
+同名的 `MetasoWebSearch` 同时加入注册表。
+
+### 秘塔搜索（默认实现）
+
+`MetasoWebSearch` 仍注册为 `web_search`，只接受对象中的字符串 `query`，拒绝额外字段、
+空查询和去除首尾空白后超过 512 个 Unicode 字符的查询。HTTP 留在 Tools，Core、Provider
+和 TUI 不认识厂商 DTO；CLI 从 `METASO_API_KEY` 读取独立凭据并装配工具。
+
+工具向固定 HTTPS 搜索地址发送 `q`，范围为 `webpage`，数量为字符串 `"5"`，关闭摘要
+增强与来源全文抓取，不调用秘塔问答接口。认证头标记 sensitive，类型使用脱敏 Debug；
+日志只记录后端、状态码、耗时、字节数和脱敏错误，不记录查询或响应正文。
+
+当前适配器读取 `webpages` 数组以及 `link/title/snippet`；缺少数组或非法 JSON 是协议
+错误，合法空数组是成功的空结果。成功 ToolResult.output 是 JSON 字符串，包含
+`backend: "metaso"`、`query`、`results`、`truncated`，结果仅有 `title/url/snippet`。
+仅接受无内嵌凭据的 HTTP(S) URL，去重保留首条；不自动抓取返回 URL。片段是不可信数据，
+不是 Agent 指令，链接是否支持最终回答仍需核对。
+
+具体工具的边界如下，不改变注册表公共接口：
+
+- 连接最多 5 秒，单次请求与正文读取总超时 20 秒；不自动重试或跟随重定向。
+- HTTP 成功正文最多 256 KiB，逐 chunk 检查；成功响应须为 JSON 类型。
+- 最多返回 5 条，标题最多 160 字符、片段最多 800 字符、URL 最多 2,048 字节。
+- 最终序列化 JSON 最多 16 KiB；超预算移除末尾结果并标记截断，不切断 JSON 字符串。
+- HTTP、传输、协议及超时错误通过现有 ToolError 转成错误 ToolResult，并回填模型。
+- 请求直接 await，不另起后台任务；Shutdown 中止 `run_turn` 时丢弃等待中的 future，
+  不承诺远端停止工作或不扣费。
+
+正常搜索与完整响应契约的验证范围见根 README。HTTP 200 内的业务错误、空结果和可空
+字段应以后续脱敏样例确认，不凭正常搜索一次成功认定所有异常响应均已覆盖。
 
 ## 多步执行与历史
 
@@ -126,6 +160,7 @@ TUI 在 ToolCallStarted/ToolCallFinished 时只更新 notice 并重绘，Session
 - Session 保留已完成工具步骤，失败部分回复不入历史；退出和 UI 背压不阻塞取消。
 - TUI 工具事件不新增 Transcript entry、不改变 Running 状态，完成/失败后清除 notice。
 
-测试使用受控 fake 和本地 fixture，不访问付费 API。接入真实搜索时替换 CLI 注册的 Tool
-实现，并补统一结果结构、超时、输出限制、隐私与引用策略；不要在 Agent loop 中加入
-Tavily 特有字段。服务候选见 [Web Search 调研](../research/web-search-research.md)。
+测试使用受控 fake 和本地 fixture，不访问付费 API。秘塔已通过替换 CLI 注册的 Tool
+接入；后续服务适配仍应在 Tools 内转换请求/结果，不在 Agent loop 中加入厂商字段。
+搜索的空结果、错误响应、超时、取消与输出预算应补专项回归。服务候选及证据边界见
+[Web Search 调研](../research/web-search-research.md)。

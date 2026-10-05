@@ -9,7 +9,7 @@
 | 配置格式 | TOML | 用户级与项目级分层加载；密钥值不进入配置文件 |
 | TUI | Ratatui + Crossterm | Ratatui 负责布局渲染，Crossterm 负责终端与事件；Tokio 统一事件循环 |
 | Transcript Markdown | tui-markdown | 仅 vortex-tui 使用，首版关闭默认 features，Assistant 正文按消息转换，User/Error 保持纯文本 |
-| HTTP | Reqwest | Provider 传输与后续真实网络工具的实现依赖，不进入 Core 公共接口；旧 exec 路径仍待迁移 |
+| HTTP | Reqwest | Provider 传输与真实网络工具的实现依赖，不进入 Core 公共接口；旧 exec 路径仍待迁移 |
 | SSE | eventsource-stream + async-stream | Provider 内分帧并构造惰性模型流，Core 只消费语义事件 |
 | 结构化 JSON | serde_json | Core/Tools 表达工具 Schema 与参数，Provider 映射载荷；不等于已接入 Schema 验证器 |
 | 日志 | tracing + tracing-subscriber + tracing-appender | CLI 初始化一次文件 subscriber，其余 crate 发事件；不向 TUI 屏幕输出 |
@@ -46,8 +46,10 @@ Core 使用 `futures-util` 的通用 Stream 接口，不依赖 HTTP/SSE 类型�
 ## 工具与日志依赖边界
 
 Core 定义 Tool trait 与注册表，只依赖通用 Future/JSON 类型；vortex-tools 通过 workspace
-依赖 Core 和 serde_json，CLI 依赖具体实现进行注册。Mock 搜索没有 HTTP 依赖；后续真实
-搜索的客户端留在具体 Tool 实现层，候选后端见 [调研](../research/web-search-research.md)。
+依赖 Core、Serde、serde_json、Reqwest、Tokio 和 tracing，CLI 依赖具体实现进行注册。
+Tokio 的 `time` feature 用于搜索超时。Mock 搜索不发网络请求；秘塔搜索使用 Reqwest
+直接调用网页检索 API，厂商请求与响应 DTO 留在具体 Tool 实现层，不进入 Core 公共接口。
+搜索契约见 [Agent loop 与搜索工具](../design/agent-loop.md)，候选比较见 [调研](../research/web-search-research.md)。
 
 CLI 初始化非阻塞 JSON 文件日志，WorkerGuard 保持到 main 结束；日志路径为
 `$VORTEX_HOME/logs/vortex.log`。RUST_LOG 与 verbose 的实际优先级、TRACE 输入风险见

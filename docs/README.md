@@ -42,7 +42,7 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：理解流式 Provider、增加思考显示或验证流中断与退出时。
 
-- [`design/agent-loop.md`](design/agent-loop.md) —— 工具版 v1 的 Tool/Registry、模型与工具循环、历史回填、ID/轮数限制、Mock 搜索与测试契约。
+- [`design/agent-loop.md`](design/agent-loop.md) —— 工具版 v1 的 Tool/Registry、模型与工具循环、历史回填、ID/轮数限制、秘塔与 Mock 搜索及测试契约。
 
   **什么时候查**：阅读 run_turn、接入真实工具，或补充工具调用与多步失败测试时。
 

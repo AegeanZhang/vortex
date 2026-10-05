@@ -1,6 +1,6 @@
 # 密钥与凭据访问设计
 
-本文档定义 Vortex 如何获取 Provider 的 API 密钥：密钥从哪里来、`.env` 的定位、配置文件中记录什么、日志如何脱敏。
+本文档定义 Vortex 如何获取模型 Provider 与搜索工具的 API 密钥：密钥从哪里来、`.env` 的定位、配置文件中记录什么、日志如何脱敏。
 
 架构层面的 crate 划分见 [`../architecture/overview.md`](../architecture/overview.md)；命令行参数契约见 [`cli-surface.md`](cli-surface.md)；本文档取舍的依据见 [`../research/credential-handling-research.md`](../research/credential-handling-research.md)。
 
@@ -51,6 +51,19 @@ set -a; . ./.env; set +a
 目标是 `.env` 只注入密钥，base_url、模型名、超时等普通配置走分层 TOML。当前 TOML
 加载尚未接入，Provider 地址/模型固定在 CLI；运行时日志路径由 VORTEX_HOME 环境变量
 提供，可以在被 Git 忽略的本地启动脚本中导出。不要把下面的目标配置示例当作现有解析能力。
+
+## 搜索服务凭据
+
+当前 TUI 装配秘塔搜索时，CLI 从进程环境读取 `METASO_API_KEY`，与模型的
+`QWEN_API_KEY` 分开管理。缺失或无效时明确报错，不静默回退到 Mock；旧 `exec` 路径
+未接入搜索工具，不要求该搜索密钥。
+
+搜索工具不自行查找 `.env`，也不接受命令行或配置文件中的密钥值。秘塔认证头标记为
+sensitive，持密工具使用手写脱敏 `Debug`；搜索工具日志不输出密钥、认证头、查询正文或原始
+响应正文，错误不透传可能含敏感信息的 HTTP 错误链或服务端正文。
+
+搜索地址与请求边界当前固定在工具实现中，尚未接入 TOML 配置。未来若增加搜索 profile，
+同样只保存密钥的环境变量名。请求与输出限制见 [Agent loop 与搜索工具](agent-loop.md)。
 
 ## Provider 配置形状
 

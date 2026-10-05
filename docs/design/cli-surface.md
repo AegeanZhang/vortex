@@ -96,7 +96,7 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 ## 分阶段落地
 
 以下阶段是目标能力分组，不是当前实现清单；实现顺序可按学习需要调整，crate 边界以
-[`架构总览`](../architecture/overview.md) 为准。当前 TUI 已复用 Session 与 Mock 工具循环，
+[`架构总览`](../architecture/overview.md) 为准。当前 TUI 已复用 Session 与工具循环，并注册秘塔网页搜索，
 exec 仍是旧非流式 HTTP 路径，不能从下表推断其已经具备工具、stdin 或 JSON 事件能力。
 
 | 阶段 | 本文档中落地的部分 |

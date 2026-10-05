@@ -33,8 +33,9 @@ vortex-tools ──> vortex-sandbox
 | `vortex-tui` | 状态机与纯渲染 | 直接调用 Provider 或工具 |
 | `vortex-cli` | 参数解析、单次模式、依赖装配和面向用户的中文错误提示 | 承载可复用业务逻辑 |
 
-Core 的 Tool trait/ToolRegistry 不依赖具体工具；MockWebSearch 位于 vortex-tools，
-只有 CLI 注册它并传给 Session。一个 Turn 的模型/工具交替执行位于 Core 的 run_turn，
+Core 的 Tool trait/ToolRegistry 不依赖具体工具；MetasoWebSearch 与 MockWebSearch 位于
+vortex-tools，由 CLI 选择、注册并传给 Session，不同时注册同名工具。一个 Turn 的
+模型/工具交替执行位于 Core 的 run_turn，
 Provider 只转换协议，TUI 只消费进度。接口见 [Agent loop](../design/agent-loop.md)。
 
 库层返回保留上下文的结构化错误，CLI 层负责将其转换为面向用户的中文提示和稳定退出码。
