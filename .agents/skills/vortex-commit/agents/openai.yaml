@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vortex Commit"
+  short_description: "读取仓库规范，检查提交范围与验证结果后安全提交已有改动"
+  default_prompt: "使用 $vortex-commit，按当前仓库规范检查并提交本次任务的已有改动，不修复或格式化，不 push。"
