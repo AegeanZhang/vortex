@@ -4,7 +4,7 @@
 
 ## Agent 与外部能力
 
-- [`web-search-research.md`](web-search-research.md) —— Web Search 的服务形态、Codex/Claude Code 对照、Tavily 等海外候选、百度/腾讯等中国大陆候选，以及 Vortex 的接入边界和首版建议。
+- [`web-search-research.md`](web-search-research.md) —— 国内外搜索候选、网络与费用边界；2026-10-02 补充 Qwen 模型侧搜索、DeepSeek V4 Pro 五次 API 实验，以及 Codex/Claude Code/DeepSeek Harness/WorkBuddy 的 CLI/桌面搜索设计与自定义模型边界；2026-10-05 记录秘塔正常搜索的作者反馈与后续验证边界。
 
 ## TUI 与内容展示
 
