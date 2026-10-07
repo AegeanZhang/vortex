@@ -32,3 +32,8 @@ cargo test --manifest-path playground/Cargo.toml --workspace --all-features --lo
 Session、工具和流式协议的场景矩阵分别见 [Session](../design/session-runtime.md)、
 [Agent loop](../design/agent-loop.md) 和 [SSE](../design/streaming-response.md)。矩阵是
 测试要求，不代表覆盖已完成；实际测试数量和检查结果只在根 README 记录。
+
+受控 FakeProvider/Stream、背压同步、本地 HTTP server 与秘塔异常场景的具体方法见
+[回归测试方案](regression-test-plan.md)。协议 fixture 放在对应 crate 的 `tests/fixtures/`，
+人工/行为评估案例放在根 `datasets/`；固定脱敏数据可纳入 Git，真实凭据与未获授权的
+用户请求/响应不得入库。行为案例不能替代确定性单元测试。

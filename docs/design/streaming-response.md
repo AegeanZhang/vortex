@@ -1,6 +1,6 @@
 # SSE 流式回答与 Thinking 展示设计
 
-- 日期：2026-09-19；代码契约更新：2026-10-01
+- 日期：2026-09-19；代码契约更新：2026-10-01；临时稿回收：2026-10-06
 - 定位：文本/工具 SSE 契约及后续 Thinking/绘制节流设计；阶段 A 与阶段 B/C 不可混为一谈。
 - 范围：TUI → Session → 当前 Chat Completions 兼容 Provider；本轮不迁移 exec。
 
@@ -105,6 +105,31 @@ Core 校验，不能在 Decoder 内用上一条模型流的状态判断。
 也不是等待下一个正文 Delta 的超时。不能把“Thinking 没产生正文”当作网络空闲。总时长/大小
 上限、原始未闭合 SSE 事件缓冲上限应独立评估，不能认为有界 channel 已限制全部内存。
 
+### 跨协议复用与第一轮等价拆分
+
+SSE 分帧可复用，不代表所有厂商的模型协议可共用一个 Decoder：
+
+| 层 | 可复用边界 | 不应负责 |
+| --- | --- | --- |
+| sse_transport | 响应状态/MIME、超时、字节流到完整 SSE Event、传输错误 | 工具参数、Thinking、DONE 或模型完成语义 |
+| 请求适配器 | 语义 ModelRequest → 厂商 DTO、认证与模型选项装配 | 会话历史提交和工具执行 |
+| 协议 Decoder | 事件类型、增量状态、工具组装、协议终态/EOF 校验 | 通用 HTTP 和 UI 状态 |
+| stream 驱动 | 惰性请求、传输到 Decoder 的连接、错误后结束 | 重试、自动恢复会话 |
+
+按实际端点/协议选择适配器，不按模型品牌字符串猜测。经 OpenAI-compatible 端点访问
+某模型时仍走该端点协议；原生接口需要独立适配。非 SSE 的流不能直接套用此传输实现。
+当前 Chat Decoder 使用 Event.data，但通用传输保留完整 Event；后续命名事件协议可能
+需要 event 类型，不应提前只保留 data。具体终态规则必须按对应协议核对，不能复制 DONE。
+
+第一轮拆分保持等价：request 拥有请求 DTO，stream 的上下文拥有 Client、认证及选项，
+第一次 poll 才发请求；正常传输 EOF 仍交给 Decoder 判定，不自动算成功。
+SecretString 如需 Clone 仍保留手写脱敏 Debug，不为打印日志开放字段或派生原文 Debug。
+只记录有语义的元数据，不把 Debug 当成字段访问权限或新增 TRACE trait。
+
+出现第二个真实协议、确认共有驱动重复后，再考虑内部 SseProtocolDecoder 抽象；不先
+新增公开 SseProvider，也不在 Core 暴露厂商 event/signature。第一轮拆分不改变超时、
+错误分类、惰性、背压或取消语义。原稿的“拒绝所有工具调用”已被工具版 v1 取代。
+
 ## 4. Session 并发、顺序与背压
 
 每个 Turn 的 `run_turn` 任务由 `JoinSet<Result<TurnOutput, TurnError>>` 管理，使用独占的
@@ -180,6 +205,11 @@ Length、ContentFilter、不支持的响应、空最终回答、非法 ID、工�
 reasoning item 不是同一种数据；未来 `/model` 必须做能力检查和明确转换/拒绝策略，不能
 把千问字段照搬到其他服务。API 没返回思考时只显示等待状态，不能补造思考文本。
 
+实施顺序应是请求选项 → run_turn 分别累积思考/正文 → TurnProgress 与 CoreEvent
+增量投影 → TUI 状态/布局 → 回归测试。不要恢复旧 ActiveTurn.content/reasoning 缓冲，
+当前 actor 只负责进度与权威历史。阶段 B 验证通过后，才单独决定是否实施阶段 C 的
+历史字段、Snapshot 和请求回传；思考签名与 opaque 数据须留在正确的协议边界。
+
 ## 7. TUI 投影与刷新
 
 阶段 A 复用已有 `AssistantTextDelta`：追加原文并请求重绘，不需要 TUI 解析 SSE。
@@ -224,6 +254,11 @@ Tokio interval 使用 `MissedTickBehavior::Skip`，结束/失败可强制刷新�
 使用受控 fake、oneshot/Notify 和本地 HTTP fixture，不依赖付费模型或 sleep 猜调度。
 TestBackend 验证布局，真实终端/PTY 验证退出恢复。已有 Core fake 测试不能证明 HTTP/SSE
 解析正确，具体覆盖与验证结果见根 README，不因文档存在而算通过。
+
+受控流、取消同步和本地 HTTP 分帧的具体方法见
+[回归测试方案](../engineering/regression-test-plan.md)。本文同时回收了本地
+`20260919-01.md`、`20260922-01.md` 与 `2026-09-22-SSE抽象问题.md` 的长期设计约束，
+不保留过时接口的逐行迁移代码。
 
 ## 9. 参考与核对日期
 

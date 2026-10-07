@@ -37,7 +37,7 @@ vortex/
 | --- | --- |
 | vortex-core | `conversation.rs` 语义历史、`provider.rs` 模型接口、`tool.rs` 工具接口与注册表、`agent_loop.rs` 多步执行、`session.rs` actor |
 | vortex-provider | `openai_chat/mod.rs` 装配、`request.rs` 请求映射、`decoder.rs` 增量组装、`stream.rs` 流连接；`sse_transport.rs` 负责传输 |
-| vortex-tools | `mock_web_search.rs` 固定搜索结果，不调用真实服务 |
+| vortex-tools | `metaso_web_search.rs` 及子模块负责秘塔 HTTP 与请求/结果映射；`mock_web_search.rs` 保留固定结果学习用途 |
 | vortex-cli | `main.rs` Provider/Tool 装配、`logging.rs` 日志；`exec.rs` 是待迁移的旧单次路径 |
 | vortex-tui | `event_loop.rs` 与 `app.rs` 消费 CoreEvent，`widgets/` 渲染局部状态 |
 

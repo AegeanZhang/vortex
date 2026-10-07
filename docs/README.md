@@ -13,6 +13,8 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 - [`engineering/coding-style.md`](engineering/coding-style.md) —— Rust 格式与命名约定。
 - [`engineering/testing.md`](engineering/testing.md) —— 测试组织和提交前检查命令。
+- [`engineering/regression-test-plan.md`](engineering/regression-test-plan.md) —— Fake/受控流、本地 HTTP 与搜索工具的回归测试步骤；区分待补覆盖和真实验证。
+- [`engineering/code-cleanup.md`](engineering/code-cleanup.md) —— 旧实现注释、占位模板的清理方法，以及仍应保留的执行链路。
 - [`engineering/git-workflow.md`](engineering/git-workflow.md) —— Commit、分支与 Pull Request 约定。
 - [`engineering/review-checklist.md`](engineering/review-checklist.md) —— Review 时检查架构、正确性与安全性的清单。
 
@@ -58,6 +60,10 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：实现长对话浏览、滚动条或 Transcript resize 行为时。
 
+- [`design/terminal-redraw-recovery.md`](design/terminal-redraw-recovery.md) —— Kitty 中边框/状态栏丢失的证据、排查步骤和强制重绘候选设计；尚未确认根因或实现修复。
+
+  **什么时候查**：排查休眠恢复后的画面异常，或设计 Resize/Ctrl+L 重绘时。
+
 - [`design/development-directions.md`](design/development-directions.md) —— 后续输入、取消、配置、上下文、工具与会话能力的候选方向和依赖，不作为完成状态或固定排期。
 
   **什么时候查**：讨论下一项能力的范围与前置条件时。
@@ -91,3 +97,20 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 **用户手册只写实际验证过的内容。** 尚未实现的命令属于设计，写在 `design/` 下并标明目标形态，
 不要写进手册——手册描述不存在的行为，比没有手册更糟。
+
+## 临时稿回收记录（2026-10-06）
+
+以下本地稿的长期有效内容已合并到正式文档；旧 API、已完成迁移的逐行代码和重复内容
+不继续维护。待实现项仍明确标为方案，回收不代表对应功能或测试已完成。
+
+| 原临时稿 | 正式文档去向 |
+| --- | --- |
+| `20260919-01.md`、`20260919-02-test.md` | [SSE 设计](design/streaming-response.md)、[回归测试方案](engineering/regression-test-plan.md) |
+| `20260922-01.md`、`2026-09-22-SSE抽象问题.md` | [SSE 的跨协议边界与等价拆分](design/streaming-response.md) |
+| `20260927-01.md` | [Agent loop](design/agent-loop.md)、[回归测试方案](engineering/regression-test-plan.md) |
+| `20261002-01.md` | [秘塔接入契约](design/agent-loop.md)、[搜索专项回归](engineering/regression-test-plan.md) |
+| `20261006-01.md` | [旧代码清理方案](engineering/code-cleanup.md) |
+| `2026-09-22-tui-display-loss.md` | [终端画面恢复待验证方案](design/terminal-redraw-recovery.md) |
+| `codex-tui.md` | [TUI 布局与输入调研](research/tui-layout-and-input-research.md) 已包含对应观察，不重复追加 |
+
+`rust-learn.md` 是个人学习笔记，问题尚未整理为项目规范，本次保留，不作为工程事实引用。
