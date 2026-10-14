@@ -196,6 +196,15 @@ Esc 只关闭菜单并保留草稿；不隐式把命令改成普通 Prompt。`//
 - [`../design/tui-interface.md`](../design/tui-interface.md)：实施前更新 slash/Paste 事件、交互优先级与多行输入规则。
 - [`../design/transcript-scrolling.md`](../design/transcript-scrolling.md)：保留内部滚动模型，动态输入高度会成为新的 viewport 变化来源。
 
+### 实现关联补充（2026-10-13）
+
+本篇 2026-09-15 的外部观察、源码基线和候选顺序保持原样，不视为当前进度清单。
+Vortex 已按首字符规则实现 `/exit` 的单行解析、前缀候选、Tab/Enter 补全、Esc 关闭、
+向上覆盖菜单、Resize 重绘与按键 Release/Repeat 过滤；正式契约见
+[TUI 接口](../design/tui-interface.md#slash-命令与菜单)，验证结果见根 [README](../../README.md)。
+当前仍是固定高度输入框，菜单与 Prompt 之间保留状态栏；Paste/bracketed paste、动态
+多行高度和 inline 仍是候选，不因菜单实现而默认获得。实际终端验收未由 TestBackend 替代。
+
 [codex-tui]: https://github.com/openai/codex/blob/459a79eb85400af759e9220c7bafb4429ae07516/codex-rs/tui/src/tui.rs
 [codex-lib]: https://github.com/openai/codex/blob/459a79eb85400af759e9220c7bafb4429ae07516/codex-rs/tui/src/lib.rs
 [codex-dispatch]: https://github.com/openai/codex/blob/459a79eb85400af759e9220c7bafb4429ae07516/codex-rs/tui/src/app/event_dispatch.rs

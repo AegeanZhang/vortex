@@ -1,7 +1,7 @@
 # 终端画面恢复与强制重绘（待验证）
 
 - 首次记录：2026-09-22；回收日期：2026-10-06。
-- 状态：待复现、待定位；下述恢复机制是候选设计，未实现。
+- 状态：Kitty 异常待复现、待定位；强制恢复机制未实现，Resize 已接入常规重绘。
 - 来源：本地 `2026-09-22-tui-display-loss.md`。关联 [TUI](tui-interface.md) 与
   [Transcript 滚动](transcript-scrolling.md)。
 
@@ -12,10 +12,14 @@ Kitty 中长时间运行 Vortex 后，PromptEditor 边框和状态栏文字消�
 异常前用户应未 resize，但曾合盖；是否真正休眠、是否稳定发生在恢复后尚未确认。
 Kitty 版本、显示环境、tmux/SSH 和后台输出情况待补充。
 
-源码检查显示：默认 PromptEditor 有完整边框，提交时 mem::take 重建默认值；ui.rs
+2026-09-22 首次排查显示：默认 PromptEditor 有完整边框，提交时 mem::take 重建默认值；ui.rs
 每次 render 都绘制状态与输入区域；event_loop.rs 按重绘请求 draw；lib.rs 忽略 Resize。
 日志走文件，未发现 TUI 路径直接 println 的明显干扰来源。这些检查不等于排除全部
 终端输出来源，也不能把忽略 Resize 直接认定为该异常的根因。
+
+2026-10-13 后续变更：Resize 已映射为 RedrawRequested 并主动执行普通绘制；上述“忽略
+Resize”是首次排查的历史状态，不再描述当前代码。Ctrl+L/强制 clear 尚未接入，未做
+Kitty 合盖恢复复现，不能将常规重绘或布局测试通过视为原问题已修复。
 
 ## 待验证的解释
 
@@ -35,8 +39,8 @@ Kitty 版本、显示环境、tmux/SSH 和后台输出情况待补充。
    独立的强制重绘 Effect，不修改草稿、会话或历史。
 4. event_loop 执行 Effect 时调用 Ratatui 的 `terminal.clear()?`，再请求正常绘制。
    不能只向终端发送清屏 ANSI 而不处理缓存，也不能每帧 clear 引入闪烁。
-5. 独立增加 Resize → 请求重绘，检查空闲时调整尺寸也及时更新布局。必要时将尺寸
-   信息作为事件输入，但不将终端控制搬进 widget。
+5. Resize → 请求重绘已接入；后续人工检查空闲时调整尺寸能否及时更新布局。必要时
+   再将尺寸信息作为事件输入，但不将终端控制搬进 widget。
 6. 强制刷新有效仅证明恢复手段可用；继续调查合盖、后台输出或终端状态变化的触发源。
 
 ## 验收

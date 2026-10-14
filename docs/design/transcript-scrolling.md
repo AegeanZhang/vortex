@@ -36,8 +36,9 @@ struct TranscriptScroll {
 启用自动跟随。
 
 `content_height` 和 `viewport_height` 是最近一次绘制得到的度量值，用于 reducer 执行
-翻页和边界限制。终端尺寸变化后由下一次绘制重新计算。当前 `Event::Resize` 不主动请求
-重绘，因此尺寸变化会在后续其他事件触发绘制时生效。
+翻页和边界限制。`Event::Resize` 通过 RedrawRequested 主动请求绘制，按新尺寸重新计算
+度量与边界；不等于强制清屏或修复终端缓存失同步。slash 菜单覆盖而不改变 Transcript
+尺寸，关闭后正常绘制恢复底层；具体交互见 [TUI 接口](tui-interface.md#slash-命令与菜单)。
 
 ## Action 与数据流
 

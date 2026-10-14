@@ -9,7 +9,7 @@
 | 类型 | 实例 | 处理 |
 | --- | --- | --- |
 | 已替代的注释代码 | 旧 Session 模型事件分支、旧请求 DTO、旧滚动算法 | 核对当前替代实现后删除副本 |
-| 无接入的预留或模板 | SlashCommand、空 config.rs、沙箱 add/it_works | 单独确认引用、导出与测试，再决定删除 |
+| 无接入的预留或模板 | 空 config.rs、沙箱 add/it_works | 单独确认引用、导出与测试，再决定删除 |
 | 仍被调用或有学习用途 | exec、MockWebSearch、TuiOptions | 保留，迁移或接口调整另行设计 |
 
 Git 已保存旧实现，不在源码保留大段“备用”副本。说明设计意图、所有权、背压和边界的
@@ -18,7 +18,9 @@ Git 已保存旧实现，不在源码保留大段“备用”副本。说明设�
 
 2026-10-06 用户已选择性删除 Session、请求模型与 Transcript 的部分注释副本，并将
 标题改为 Vortex。因此原稿中“尚未执行全部步骤”和旧行号不再适用，继续操作前重新
-读取工作区。Quit 问题已由用户暂缓，不作为清理前置条件，也不顺手恢复 Ctrl+C。
+读取工作区。当时 Quit 问题已由用户暂缓；2026-10-13 的 slash v1 已在生产路径构造
+Quit，command.rs 也已承载解析和命令表，两者不再是未接入预留，不得按旧计划删除。
+是否恢复 Ctrl+C 属于独立交互任务。
 
 ## 2. 建立清理前基线
 
@@ -61,8 +63,8 @@ abort_all、FakeProvider 与取消测试。它们复杂但不是旧代码。标�
 
 此阶段含真实声明/实现删除，须独立授权和 Review：
 
-1. **SlashCommand**：确认只有枚举、没有解析或调用方，再删除 TUI 的 `mod command;`
-   和 `command.rs`。当前 `/exit` 由 app.rs 处理，不依赖此占位模块；正式 slash 实现另做。
+1. **SlashCommand（旧建议已失效）**：原稿针对只有预留枚举的 command.rs；当前模块已
+   被单行命令解析和菜单使用，保留 `mod command;`、文件及测试，不执行旧删除步骤。
 2. **空配置文件**：确认 `crates/vortex-core/src/config.rs` 仍为 0 行且没有 mod/include/调用，再删除。
    不改 lib.rs、不否定 TOML 分层配置选型，也不创建假的配置加载器。
 3. **沙箱模板**：检查全部产品源码与 manifest 对 add 的引用，再移除 add/it_works。
@@ -77,7 +79,8 @@ rg -n 'vortex_sandbox|vortex-sandbox|\badd\(' crates Cargo.toml
 ```
 
 无匹配的 rg 退出码 1 可为预期结果。模板测试删除会使总数减少，不应宣称覆盖率因此
-提高；真实取消/历史/布局测试不得删除。严格 Clippy 仍可能被暂缓的 Quit 警告阻挡。
+提高；真实取消/历史/布局测试不得删除。Quit 已接入真实退出链，不沿用其旧警告说明；
+全局检查仍以实际输出为准，不能把 TUI 检查通过扩大为全产品通过。
 
 ## 5. 必须保留与独立任务
 
@@ -87,8 +90,8 @@ rg -n 'vortex_sandbox|vortex-sandbox|\badd\(' crates Cargo.toml
   删除 Provider/Tools 仍使用的 Workspace 依赖或要求它们从整个锁文件消失。
 - **MockWebSearch** 保留学习和人工对照用途；它不是 FakeProvider。不能简单用
   `#[cfg(test)]` 隐藏跨 crate 消费的类型。
-- **Quit、正式 slash、TuiOptions.color、CLI config 参数** 属于交互或公开接口变更，
-  不因暂未生效就删除；日志签名和正文 TRACE 隐私审计也另做。
+- **Quit/slash 扩展、TuiOptions.color、CLI config 参数** 属于交互或公开接口变更，
+  不因暂未生效就删除；日志签名与全链路隐私审计另做，已移除的提交正文 TRACE 不恢复。
 - **四次工具上限、SSE 严格完成、阶段 A 拒绝 Thinking** 是真实契约，不为案例成功放宽。
   鼠标/滚动条与终端恢复问题亦不混入清理。
 - **依赖 features** 先核对实际使用和单独 crate 构建，不能因 Workspace feature 合并

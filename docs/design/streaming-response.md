@@ -237,8 +237,8 @@ Tokio interval 使用 `MissedTickBehavior::Skip`，结束/失败可强制刷新�
 
 日志契约要求只记录必要元数据，不记录请求/响应正文；Thinking 的显示权限不等于日志
 落盘权限，API key 在任何级别都禁止记录。Provider 流路径没有整段 ChatRequest trace，
-但 TUI 提交分支仍有输入原文的 TRACE：启用全局 trace 或 vortex_tui=trace 会记录 Prompt。
-这属于待修正差异，不能宣称全链路已满足脱敏要求，也不应为排障默认开启正文诊断。
+TUI 提交分支的输入原文 TRACE 也已在 slash 接入时移除；这不代表全链路日志/错误路径
+已经完成脱敏验收，不应为排障默认开启正文诊断。
 模型文本不执行、不作为命令，控制字符过滤仍是独立工作，不能声称 SSE/Markdown 已提供防护。
 
 下表是验收目标，Thinking 与节流相关用例随对应阶段补齐，不表示已有这些能力或完整覆盖。

@@ -8,6 +8,7 @@ pub(crate) enum UiAction {
     SubmitPrompt,
     CoreEvent(CoreEvent),
     ScrollTranscript(ScrollCommand),
+    RedrawRequested,
 }
 
 #[derive(Debug, PartialEq, Eq)]

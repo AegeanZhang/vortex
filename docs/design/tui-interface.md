@@ -1,5 +1,7 @@
 # TUI 接口设计
 
+接口核对日期：2026-10-13。本文描述当前实现契约；验证结果见根 README，后续能力单独标注。
+
 本文档以文本流式和工具状态接口为基线，说明 `vortex-tui` 如何消费
 `vortex-core::SessionConnection`。Session actor 和 Provider 调用链见
 [`session-runtime.md`](session-runtime.md)，技术选型见
@@ -13,7 +15,7 @@
 
 - CLI 读取环境变量、装配 Provider 和 ToolRegistry、启动 Session，再把连接交给 TUI。
 - Core 保存对话事实、执行 Turn 并发布 `CoreEvent`。
-- TUI 保存 Prompt、Transcript、notice 和用于展示的 Session 状态。
+- TUI 保存 Prompt、Transcript、CommandMenu、notice 和用于展示的 Session 状态。
 - Ratatui、Crossterm 和 `ratatui-textarea` 类型不得进入 `vortex-core`。
 
 当前入口为：
@@ -46,9 +48,10 @@ CoreEventStream ────────────────┘             
 | `event_loop.rs` | 等待终端/Core 事件、调用 reducer、顺序执行 Effect |
 | `app.rs` | `AppState` 和唯一状态修改入口 `update` |
 | `action.rs` | `UiAction` 与 `Effect` |
+| `command.rs` | 已实现命令的统一定义、单行解析与补全前缀；目前仅 Exit |
 | `ui.rs` | 四区布局；渲染时允许更新 widget 的视口度量，不改变会话事实 |
 | `markdown.rs` | 单条 Assistant 正文转换，保留样式与对齐继承 |
-| `widgets/` | `PromptEditor` 与 `Transcript` 的局部状态和渲染 |
+| `widgets/` | `PromptEditor`、`CommandMenu` 与 `Transcript` 的局部状态和渲染 |
 
 后台任务不能直接修改 UI 或绘制终端。`update` 是同步纯状态转换；发送异步命令和退出循环
 由 event loop 执行。
@@ -61,26 +64,75 @@ event bus。等第二个页面、焦点切换或真正可复用的控件出现�
 
 当前按键映射如下：
 
-- `UiAction::Quit` 复用 Shutdown → Exit；当前 `Ctrl+C` 映射已被注释，不应视为可用入口。
-- `Enter` → `UiAction::SubmitPrompt`。
+- 完整 `/exit` 提交后构造 `UiAction::Quit`，复用 Shutdown → Exit；当前没有 Ctrl+C 退出映射。
+- 无修饰键 `Enter` → `UiAction::SubmitPrompt`；Ctrl/Alt/Shift+Enter 交给编辑器并被拒绝，不提交或换行。
 - `PageUp` / `PageDown` → Transcript 向上或向下翻页。
 - `Ctrl+Home` / `Ctrl+End` → Transcript 跳到开头或末尾。
-- 其他 `KeyEvent` → `UiAction::EditPrompt`，交给 `PromptEditor`。
+- 其他 `KeyEvent` → `UiAction::EditPrompt`，先由 App 检查菜单，再交给 `PromptEditor`。
 - 鼠标滚轮向上/向下 → Transcript 滚动 3 个渲染行，当前不按鼠标位置分区。
-- 其他鼠标事件、`Event::Resize` 和 Paste 当前忽略；尚未过滤按键 Release/Repeat。
+- `Event::Resize` → `UiAction::RedrawRequested` → `Effect::Redraw`，下一次绘制按新尺寸布局。
+- Release 全部忽略；Enter/Tab/Esc 的 Repeat 忽略，普通字符和方向键 Repeat 保留。
+- 其他鼠标事件和 Paste 当前忽略，尚未启用 bracketed paste。
 
-提交时，TUI 只生成 `SendCommand(SubmitPrompt)`，不会乐观地把用户文本写入 Transcript。
-显示更新以 Core 随后发送的 `UserMessageAdded` 为准。空输入会清空编辑器但不发送命令；
-`Running` 时普通提交应保留编辑器内容，并在状态栏显示拒绝原因；当前代码先调用
-`take_text()` 再判断 Running，仍会清空草稿，这是待修正差异，不是目标交互。
-
-当前 `/exit` 是 `content.trim() == "/exit"` 的临时入口，可在 Running 时退出。正式 slash
-解析、菜单和粘贴方案见 [`../research/tui-layout-and-input-research.md`](../research/tui-layout-and-input-research.md)：
-要求 `/` 位于原始草稿首字符，粘贴只编辑而不执行。临时实现不代表这些规则已经落地。
+普通 Prompt 提交时，TUI 只生成 `SendCommand(SubmitPrompt)`，不会乐观地把用户文本写入 Transcript。
+显示更新以 Core 随后发送的 `UserMessageAdded` 为准。提交先用 `text()` 非消费读取并解析
+命令；全空白输入不发送、不清空。已知 `Running` 状态下普通提交保留草稿并设置 notice。
+普通 Prompt 通过本地判断后才 `take_text()`，发送原文，不去除首尾空白。
+发送与 Core 接受之间的 pending_submit、Core 拒绝后的草稿恢复尚未实现，不能把本地
+Running 检查视为完整的提交确认机制。
 
 `Effect` 当前只有三种：发送 `AgentCommand`、请求重绘和退出。Effect 按返回顺序执行；退出
 会先发送 `Shutdown`，成功后才结束 event loop。Shutdown 通过独立 watch 信号通知 Core，
 发送成功不等于后台任务已经回收；它不是取消完成的确认。命令发送失败时返回 `TuiError`。
+
+## Slash 命令与菜单
+
+### 解析与执行
+
+`COMMANDS` 是名称、说明和命令标识的唯一来源；目前只注册 `/exit`，不展示未实现的
+clear/compact/model。`parse_command` 返回 `NotCommand`、`Incomplete`、`Ready` 或
+`Invalid`；`completion_prefix` 只用于筛选，不执行命令。
+
+`/` 必须是整个原始草稿的首字符，不先 trim/trim_start。仅支持单行，完整 exit 只允许
+尾部 ASCII 空格/Tab，检查 CR/LF 在尾部空白处理之前。命令名大小写敏感，无参数或转义。
+
+| 草稿与确认动作 | 当前行为 |
+| --- | --- |
+| `/`、`/e`、`/ex`、`/exi` + Enter | 补全为 `/exit` 并关闭菜单；第二次独立 Enter 才退出 |
+| `/exit`、`/exit `、`/exit\t` + Enter | 在 Idle/Running/Failed 均退出，不发送 Prompt |
+| ` /exit`、`说明 /exit` | 普通 Prompt；原文保留，仍受 Running 提交限制 |
+| `/exit now`、`/exitfoo`、`/EX`、`/ exit`、`/ex `、`//exit` | 错误 notice，草稿保留，不交给模型 |
+| 首字符为 / 且含 CR/LF | 拒绝多行命令，草稿保留，不吞掉换行后退出 |
+
+完整命令按解析结果执行，不按菜单当前选中项执行。退出路径为
+SubmitPrompt → Ready(Exit) → update(Quit) → SendCommand(Shutdown), Exit → event loop
+返回 UserExit → TerminalGuard 清理。它不是保留 Session 的 CancelTurn，不调用 process::exit。
+
+### 自动显示、导航与关闭
+
+输入首字符 `/` 后自动显示候选；单 token 前缀筛选，未知前缀显示“没有匹配的命令”。
+菜单打开时，无修饰键 Up/Down 循环选择，Tab 只补全并关闭，Esc 只关闭且保留草稿；
+其他输入仍交编辑器。菜单关闭时方向键恢复编辑器操作。PageUp/PageDown 和鼠标滚轮
+继续滚动 Transcript，不用于菜单导航；无匹配时 Tab 仅提示无可补全项。
+
+CommandMenu 保存候选静态引用、selected 和 dismissed。常规编辑路径仅在文本实际改变时 sync，
+光标移动、CoreEvent 与单纯重绘不重新打开被 Esc 关闭的菜单。不完整命令的显式 Enter
+可以主动重建候选并补全，但仍不退出。补全会重置编辑器的选择与 undo history。
+
+### 覆盖布局与边界
+
+Prompt 固定底部；菜单左对齐覆盖 main_area 底部，不缩小 Transcript 或移动输入框。
+状态栏保持原位，菜单与 Prompt 之间仍有一行状态栏。宽度最多 48 列，高度为候选内容行
+（1～5 行）加两行边框，并受 main_area 限制；宽不足 4 或高不足 3 时不绘制，键盘补全
+仍可使用。不承诺极小窗口可以看清所有文本。
+
+先画 Transcript/status，再对菜单矩形渲染 Ratatui Clear 和 List，最后画 Prompt。
+这里 Clear 只清本帧 buffer 的局部区域，不是 terminal.clear()。关闭菜单请求正常重绘，
+恢复底层历史，不保留空白占位，也不改变滚动偏移；小窗口无法展示菜单不是命令解析失败。
+
+Paste、动态多行高度、多项真实命令和鼠标菜单选择尚未实现。粘贴隔离是后续独立工作，
+不能因单行命令校验或 Enter Repeat 过滤就保证粘贴的换行不会提交。
+交互取舍与后续输入方案见 [调研](../research/tui-layout-and-input-research.md)。
 
 ## PromptEditor 边界
 
@@ -88,9 +140,14 @@ event bus。等第二个页面、焦点切换或真正可复用的控件出现�
 包装第三方 `Input`，使 `action.rs` 和 `AppState` 不需要了解 TextArea API；组件不暴露
 `textarea()` 或可变 getter。使用 `'static` 避免把控件的生命周期传播到整个 AppState。
 
-Enter 在全局映射阶段转换为 `SubmitPrompt`，`PromptEditor::handle_input` 也拒绝 Enter，
+无修饰键 Enter 在全局映射阶段转换为 `SubmitPrompt`，`PromptEditor::handle_input` 也拒绝 Enter，
 防止它意外插入换行。`take_text()` 使用 `std::mem::take` 取出文本，并以默认编辑器替换旧
 实例，因此内容、光标、选择和 undo history 会一起重置，同时恢复边框与 placeholder。
+
+`text()` 只读取草稿，`replace_text()` 重建默认编辑器后整段插入，供菜单补全使用；
+`PromptInput::menu_key()` 识别无 ctrl/alt/shift 的菜单键，不让 App 直接访问 TextArea。
+TextArea 插入 CRLF 时会规范化为 LF；保留草稿的断言比较提交前后实际文本，原始 CR/LF
+的解析边界由 command.rs 的独立测试覆盖。
 
 当前 Prompt 区高度固定为 3，只支持 Enter 提交的单行交互。以后增加多行输入时，需要同时
 确定插入换行的组合键和输入区高度策略，不能只放开 TextArea 的 Enter。
@@ -114,7 +171,7 @@ Assistant 消息，System 消息当前不显示。
 
 一个 Turn 的多个模型步骤共用一条 Assistant entry，步骤前缀与最终正文直接累积；尚未
 按工具步骤拆分展示或加入结果卡片。工具错误结果不等于 TurnFailed，模型仍可能继续回答。
-AssistantTextDelta 当前不清除工具 notice，它在编辑输入、下一轮开始或 Turn 终态时更新/
+AssistantTextDelta 当前不清除工具 notice，它在文本实际编辑、补全、下一轮开始或 Turn 终态时更新/
 清除，不能把 waiting for model 当作精确的模型阶段状态。工具执行规则见
 [Agent loop](agent-loop.md)。
 
@@ -137,7 +194,8 @@ Effect 中的重复请求，但当前没有定时 tick 或跨事件的刷新窗�
 [`transcript-scrolling.md`](transcript-scrolling.md)。Assistant 正文通过 `markdown.rs`
 逐消息转换，User/Error 保持纯文本；标签、间距、测高与滚动仍归 Transcript。
 每次重绘按累积原文重新转换，不单独解析每个 delta，也不把展示结果写回 Session。
-当前没有 resize 专用 Action 或窄窗口降级布局；尺寸变化在后续其他事件触发绘制时生效。
+Resize 已请求主动重绘，布局和菜单矩形按新 Frame 计算；这是常规绘制，不是强制清屏，
+不证明 Kitty 休眠恢复问题已经修复。菜单有极小区域隐藏策略，整体四区布局仍需人工验收。
 
 `TerminalGuard` 从 raw mode 开启后立即接管清理。正常退出显式调用 `cleanup`；初始化后
 发生错误或 unwind 时由 `Drop` 尽力关闭 raw mode、鼠标捕获、离开 alternate screen 并显示光标。
@@ -147,10 +205,14 @@ TUI 运行期间不得使用 `println!` 破坏屏幕。
 
 通用规范见 [`../engineering/testing.md`](../engineering/testing.md)。优先测试 reducer 和
 widget 的确定性状态，不通过真实键盘或真实 Provider 制造条件。
+以下矩阵包含已覆盖与待补场景，不代表全部完成；具体数量与执行结果只在根 README 记录。
 
 | 模块与位置 | 场景 | 关键断言 |
 | --- | --- | --- |
 | `app.rs` | Quit | `Shutdown` 位于 `Exit` 之前 |
+| `command.rs` | 完整/前缀/未知命令、尾部空白、CR/LF、首字符规则 | Ready/Incomplete/Invalid/NotCommand 分类正确 |
+| `app.rs` | Enter/Tab 补全、Esc、无匹配、Idle/Running/Failed exit | 补全不执行；退出只产生 Shutdown → Exit |
+| 同上 | CoreEvent/光标移动后菜单保持关闭、实际编辑重开、删除 / | dismissed 与候选按实际文本变化更新 |
 | 同上 | 空输入、正常提交、Running 时提交 | 是否保留输入、发送命令和设置 notice 均正确 |
 | 同上 | 每一种 `CoreEvent` | status、notice、Transcript 与 Redraw 一致 |
 | 同上 | 工具开始、成功/错误结果 | 只改变 notice；仍 Running，不新增 Transcript entry |
@@ -158,10 +220,12 @@ widget 的确定性状态，不通过真实键盘或真实 Provider 制造条件
 | 同上 | 失败前无内容/已有部分内容 | 分别删除空占位/保留部分回复，并追加 Error |
 | 同上 | Snapshot 投影 | User/Assistant 保留，System 隐藏，顺序不变 |
 | `widgets/prompt_editor.rs` | 普通输入、Backspace、Enter、提交重置 | `q` 等字符可输入，Enter 不新增行，取值后编辑状态恢复默认 |
+| `widgets/command_menu.rs` | 打开/筛选/关闭、单项/空项导航 | 索引有效，无候选不 panic、不选择命令 |
 | `ui.rs` | 标准布局与基本边框 | `TestBackend` 中四区位置正确 |
 | 同上 | 空会话、消息、notice、窄窗口 | 关键文本可见且渲染不 panic |
+| 同上 | 菜单矩形、覆盖后关闭、无匹配、极小窗口 | Prompt 不移动，历史画面恢复，不越界或 panic |
 | `event_loop.rs` | Effect 执行 | 命令发送、Redraw/Exit 聚合及 channel 错误正确 |
-| `lib.rs` | 输入映射 | Enter、普通键、翻页和鼠标映射正确；恢复退出快捷键时补对应测试 |
+| `lib.rs` | 输入映射 | 修饰键/Release/Repeat、菜单键、Resize、翻页和鼠标映射正确 |
 
 终端恢复还需要人工或 PTY 集成测试，不能由 `TestBackend` 证明。event loop 测试应使用
 fake Session/channel，禁止访问真实模型服务。
@@ -174,7 +238,9 @@ fake Session/channel，禁止访问真实模型服务。
 - `CancelTurn`；未来 `Ctrl+C` 在 Running 时应先取消，Idle 时才退出。
 - Thinking 展示与跨事件重绘节流，目标见 [`streaming-response.md`](streaming-response.md)；
   Provider 文本流已通过现有 `AssistantTextDelta` 接口投影，无需 TUI 解析 SSE。
-- 终端 resize 主动触发重绘、工具详情/来源卡片、审批弹窗、多行提交策略和会话恢复。
+- Paste 与 bracketed-paste 生命周期、动态多行输入、更多 slash 命令与鼠标菜单交互。
+- pending_submit、Core 拒绝后的草稿恢复、退出完成确认、强制重绘恢复。
+- 工具详情/来源卡片、审批弹窗、多行提交策略和会话恢复。
 - 模型文本的终端控制字符过滤。
 
 会话能力先扩展 Core 的语义契约，再投影到 TUI；纯展示、输入和滚动能力留在 TUI。

@@ -94,9 +94,10 @@ api_key_env  = "DEEPSEEK_API_KEY"     # 变量名，不是值
 
 第三条是最容易在调试时被绕过的：临时加一句 `dbg!(&request)` 就会泄露，而派生的 `Debug` 让它看起来无害。用类型层面的实现堵住，比依赖纪律可靠。
 
-当前 SecretString 使用手写脱敏 Debug，但 TUI 提交分支仍有输入正文 TRACE；这不满足
-完整的内容保护要求。启用 vortex_tui=trace 或全局 trace 前需确认日志内容风险，不能把
-持密类型脱敏等同于 Prompt/工具结果的日志安全。实际日志入口见 [指南](../guide/getting-started.md#日志与本地配置)。
+当前 SecretString 使用手写脱敏 Debug，TUI slash 接入时已移除提交分支的输入正文 TRACE。
+这只移除了一个已知风险点，不是全链路隐私审计通过；启用详细日志前仍应确认错误链和
+新增诊断不会输出正文或凭据，不能把持密类型脱敏等同于 Prompt/工具结果的日志安全。
+实际日志入口见 [指南](../guide/getting-started.md#日志与本地配置)。
 
 ## 代价
 

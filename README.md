@@ -12,6 +12,13 @@ Transcript 已接入 Assistant Markdown、键盘翻页与鼠标滚轮；相关�
 阶段 B/C 的 Thinking 契约见 [`docs/design/streaming-response.md`](docs/design/streaming-response.md)。
 Shutdown 可通知 Session 中止活跃流，但尚无保留会话的 `CancelTurn`；exec 未迁移到流式链路。
 
+Slash v1 已实现单行解析与向上覆盖的候选菜单，目前仅 `/exit`：草稿首字符为 `/` 时
+自动显示，Tab 只补全；`/` 或 `/ex` 按 Enter 先补为 `/exit`，再次按 Enter 才退出。
+Esc 关闭并保留草稿，完整 `/exit` 在 Idle/Running/Failed 均复用 Shutdown → Exit。
+未知/带参数/多行 slash 不发送给模型；普通 Prompt 在已知 Running 状态下保留草稿。
+Resize 主动重绘，按键 Release 与确认键 Repeat 已过滤；Paste、动态多行高度和其他
+slash 命令仍未实现。完整契约见 [`TUI 接口设计`](docs/design/tui-interface.md#slash-命令与菜单)。
+
 工具版 v1 每个模型步骤只接受一个调用，一个 Turn 最多执行 4 次工具调用；第五次会失败。
 工具错误作为 `is_error = true` 的结果回填给模型，空白或重复调用 ID 则直接使 Turn 失败。
 TUI 仅用状态栏展示工具开始/完成，不显示工具卡片或来源引用。设计见
@@ -23,7 +30,7 @@ Thinking、会话恢复、模型切换、网页正文读取、MCP 和沙箱仍�
 Core 的 7 个测试覆盖无工具文本流的增量顺序、
 历史和退出背压；Provider、工具注册表及新 Agent loop 尚无专项测试，不能据此认定工具
 闭环或 HTTP/SSE 已充分验证。当时真实模型工具调用、流式表现与终端恢复尚需人工验收，
-搜索正常路径的后续反馈见下文。严格 Clippy 仍被 TUI 的 `Quit` / `SlashCommand` 未使用警告阻挡。
+搜索正常路径的后续反馈见下文。当时严格 Clippy 被 TUI 的 `Quit` / `SlashCommand` 未使用警告阻挡。
 
 补充验证（2026-10-05）：作者反馈已运行编译后的程序并成功执行秘塔搜索，正常路径已
 人工跑通；本次 Agent 没有调用真实 API，也未取得脱敏原始响应、费用或网络地域记录。
@@ -31,6 +38,16 @@ Core 的 7 个测试覆盖无工具文本流的增量顺序、
 `cargo clippy -p vortex-tools --lib --locked -- -D warnings` 通过，编译仍有上述 TUI 警告。
 本次未运行单元测试；空结果、业务错误、超时、大小限制和搜索期间退出仍需后续回归验证，
 不把一次成功搜索等同于完整的响应契约或可靠性验收。
+
+Slash 补充验证（2026-10-13）：本次执行 `cargo check --workspace --all-targets --locked`
+与 `cargo test --workspace --all-features --locked` 通过。产品测试共 47 项：Core 7、TUI 39、
+沙箱模板 1；本轮新增 32 项 TUI 测试，覆盖解析、菜单/补全、草稿保留、退出 Effect 顺序、
+按键映射及 TestBackend 布局恢复。TUI 的
+`cargo clippy -p vortex-tui --all-targets --all-features --locked -- -D warnings` 通过。
+全局 fmt 检查未通过，差异位于 TUI 的 command.rs、ui.rs、widgets/command_menu.rs；
+全局严格 Clippy 被旧 CLI exec.rs 的 collapsible_if 阻挡，不能写成完整检查通过。
+未运行 release 构建、真实 API 或真实终端/PTY；真实 resize、退出恢复与 Kitty 合盖异常
+仍需人工验证。工具循环和 HTTP/SSE 的专项覆盖未因这些输入测试而补齐。
 
 ## 首版方向
 
@@ -105,8 +122,9 @@ cargo run --manifest-path playground/Cargo.toml -p tui-demo # 运行 TUI 实验�
 地址和模型仍由 CLI 固定装配，尚未接入 TOML 配置。
 
 日志以 JSON 行追加到 `$VORTEX_HOME/logs/vortex.log`，默认级别为 `info`；未使用 `-v`
-时可用 `RUST_LOG` 调整，单个 `-v` 强制 `debug`。注意：TUI 仍有记录输入原文的 TRACE，
-全局 `RUST_LOG=trace` 或 `vortex_tui=trace` 会使 Prompt 落盘；日志脱敏尚未完整验证。
+时可用 `RUST_LOG` 调整，单个 `-v` 强制 `debug`。本轮已移除 TUI 提交分支记录输入原文的
+TRACE；这只解决已知日志点，不代表所有日志/错误路径已完整脱敏验收，也不应默认开启
+正文诊断。新增日志仍不得记录密钥、Prompt、工具结果或模型正文。
 
 ## Roadmap
 

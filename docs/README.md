@@ -52,9 +52,9 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：实现 Agent loop、上下文压缩、工具调用或 Provider 请求转换时。
 
-- [`design/tui-interface.md`](design/tui-interface.md) —— TUI 的状态流、增量事件投影、终端生命周期，以及后续交互边界。
+- [`design/tui-interface.md`](design/tui-interface.md) —— TUI 状态流、slash v1 的解析/补全菜单与 /exit、增量事件投影、终端生命周期及后续交互边界。
 
-  **什么时候查**：阅读 `vortex-tui`、补充 reducer/widget 测试，或增加终端交互时。
+  **什么时候查**：阅读 `vortex-tui`、核对 slash 的 Enter/Tab/Esc 行为、补充 reducer/widget 测试，或增加终端交互时。
 
 - [`design/transcript-scrolling.md`](design/transcript-scrolling.md) —— Transcript 的滚动状态、自动跟随、按键映射、滚动条渲染和测试边界。
 

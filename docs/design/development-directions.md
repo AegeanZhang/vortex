@@ -7,9 +7,9 @@
 
 | 方向 | 依赖与边界 | 设计入口 |
 | --- | --- | --- |
-| 输入与退出 | 正式 slash 解析、菜单、Paste 只编辑；不要把临时 trim 匹配当成最终规则 | [输入调研](../research/tui-layout-and-input-research.md) |
+| 输入与退出 | slash v1 仅 exit；后续补 Paste 只编辑、动态多行、提交确认/草稿恢复和更多真实命令 | [TUI 接口](tui-interface.md#slash-命令与菜单)、[输入调研](../research/tui-layout-and-input-research.md) |
 | Transcript 稳定性 | 鼠标/键盘同一滚动模型；resize、Unicode、极小窗口与终端恢复测试 | [滚动设计](transcript-scrolling.md) |
-| 终端画面恢复 | Kitty 长时间运行/合盖后边框与状态栏丢失待定位；强制重绘和 Resize 是候选恢复措施 | [画面恢复](terminal-redraw-recovery.md) |
+| 终端画面恢复 | Resize 已接入普通重绘；Kitty 合盖后画面丢失待定位，强制重绘仍是候选 | [画面恢复](terminal-redraw-recovery.md) |
 | 流式输出与 Thinking | 增量流、终态顺序、失败历史策略，再做折叠与缓存 | [流式响应](streaming-response.md) |
 | 工具闭环验证 | 秘塔搜索已接入；用 FakeProvider/Tool 补结果回填、轮数/ID、失败历史、网络异常与退出测试 | [Agent loop](agent-loop.md) |
 | Turn 取消 | 区分取消、失败和整个 Session 退出；候选为 Running 时 Ctrl+C 取消、Idle 时退出 | [Session](session-runtime.md) |

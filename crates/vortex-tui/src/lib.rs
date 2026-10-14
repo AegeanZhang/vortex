@@ -12,7 +12,7 @@ pub mod options;
 
 pub use error::TuiError;
 
-use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 
 use crate::{
     action::{ScrollCommand, UiAction},
@@ -44,6 +44,13 @@ const WHEEL_SCROLL_LINES: usize = 3;
 
 pub(crate) fn map_event(event: Event) -> Option<UiAction> {
     match event {
+        Event::Key(key) if key.kind == KeyEventKind::Release => None,
+        Event::Key(key)
+            if key.kind == KeyEventKind::Repeat
+                && matches!(key.code, KeyCode::Enter | KeyCode::Tab | KeyCode::Esc) =>
+        {
+            None
+        }
         Event::Key(key) if key.code == KeyCode::PageUp => {
             Some(UiAction::ScrollTranscript(ScrollCommand::PageUp))
         }
@@ -60,12 +67,9 @@ pub(crate) fn map_event(event: Event) -> Option<UiAction> {
         {
             Some(UiAction::ScrollTranscript(ScrollCommand::ToBottom))
         }
-        /*Event::Key(key)
-            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) =>
-        {
-            Some(UiAction::Quit)
-        }*/
-        Event::Key(key) if key.code == KeyCode::Enter => Some(UiAction::SubmitPrompt),
+        Event::Key(key) if key.code == KeyCode::Enter && key.modifiers.is_empty() => {
+            Some(UiAction::SubmitPrompt)
+        }
         Event::Key(key) => Some(UiAction::EditPrompt(key.into())),
         Event::Mouse(mouse) => match mouse.kind {
             MouseEventKind::ScrollUp => Some(UiAction::ScrollTranscript(ScrollCommand::LinesUp(
@@ -76,6 +80,130 @@ pub(crate) fn map_event(event: Event) -> Option<UiAction> {
             )),
             _ => None,
         },
+        Event::Resize(_, _) => Some(UiAction::RedrawRequested),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyEvent, MouseEvent};
+
+    fn key_event(code: KeyCode, modifiers: KeyModifiers, kind: KeyEventKind) -> Event {
+        let mut key = KeyEvent::new(code, modifiers);
+        key.kind = kind;
+        Event::Key(key)
+    }
+
+    #[test]
+    fn submit_requires_plain_enter_press() {
+        assert_eq!(
+            map_event(key_event(
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+                KeyEventKind::Press
+            )),
+            Some(UiAction::SubmitPrompt)
+        );
+        for modifiers in [
+            KeyModifiers::CONTROL,
+            KeyModifiers::ALT,
+            KeyModifiers::SHIFT,
+        ] {
+            let key = KeyEvent::new(KeyCode::Enter, modifiers);
+            assert_eq!(
+                map_event(Event::Key(key)),
+                Some(UiAction::EditPrompt(key.into()))
+            );
+        }
+    }
+
+    #[test]
+    fn key_releases_never_produce_actions() {
+        for code in [
+            KeyCode::Enter,
+            KeyCode::Tab,
+            KeyCode::Esc,
+            KeyCode::Char('/'),
+            KeyCode::Up,
+            KeyCode::PageUp,
+        ] {
+            assert_eq!(
+                map_event(key_event(code, KeyModifiers::NONE, KeyEventKind::Release)),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn repeat_ignores_confirmation_keys_but_keeps_editing_and_navigation() {
+        for code in [KeyCode::Enter, KeyCode::Tab, KeyCode::Esc] {
+            assert_eq!(
+                map_event(key_event(code, KeyModifiers::NONE, KeyEventKind::Repeat)),
+                None
+            );
+        }
+        for code in [KeyCode::Char('e'), KeyCode::Up, KeyCode::Down] {
+            let mut key = KeyEvent::new(code, KeyModifiers::NONE);
+            key.kind = KeyEventKind::Repeat;
+            assert_eq!(
+                map_event(Event::Key(key)),
+                Some(UiAction::EditPrompt(key.into()))
+            );
+        }
+    }
+
+    #[test]
+    fn menu_keys_are_routed_to_stateful_editor_handling() {
+        for code in [KeyCode::Up, KeyCode::Down, KeyCode::Tab, KeyCode::Esc] {
+            let key = KeyEvent::new(code, KeyModifiers::NONE);
+            assert_eq!(
+                map_event(Event::Key(key)),
+                Some(UiAction::EditPrompt(key.into()))
+            );
+        }
+    }
+
+    #[test]
+    fn transcript_scroll_keys_and_mouse_wheel_keep_their_mapping() {
+        for (code, modifiers, command) in [
+            (KeyCode::PageUp, KeyModifiers::NONE, ScrollCommand::PageUp),
+            (
+                KeyCode::PageDown,
+                KeyModifiers::NONE,
+                ScrollCommand::PageDown,
+            ),
+            (KeyCode::Home, KeyModifiers::CONTROL, ScrollCommand::ToTop),
+            (KeyCode::End, KeyModifiers::CONTROL, ScrollCommand::ToBottom),
+        ] {
+            assert_eq!(
+                map_event(Event::Key(KeyEvent::new(code, modifiers))),
+                Some(UiAction::ScrollTranscript(command))
+            );
+        }
+        for (kind, command) in [
+            (MouseEventKind::ScrollUp, ScrollCommand::LinesUp(3)),
+            (MouseEventKind::ScrollDown, ScrollCommand::LinesDown(3)),
+        ] {
+            let mouse = MouseEvent {
+                kind,
+                column: 10,
+                row: 10,
+                modifiers: KeyModifiers::NONE,
+            };
+            assert_eq!(
+                map_event(Event::Mouse(mouse)),
+                Some(UiAction::ScrollTranscript(command))
+            );
+        }
+    }
+
+    #[test]
+    fn resize_requests_redraw() {
+        assert_eq!(
+            map_event(Event::Resize(80, 24)),
+            Some(UiAction::RedrawRequested)
+        );
     }
 }

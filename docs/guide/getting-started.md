@@ -157,8 +157,8 @@ RUST_LOG=info,vortex_core=debug cargo run -p vortex-cli --locked
 cargo run -p vortex-cli --locked -- -v
 ```
 
-注意：`app.rs` 仍有记录完整输入的 TRACE。全局 trace 或 vortex_tui=trace 会将 Prompt
-落盘，不要用于含敏感内容的对话；前面的脱敏验收项尚不能据此宣称已通过。
+已移除 `app.rs` 提交分支记录输入原文的 TRACE，但尚未完成全链路日志/错误脱敏验收。
+不要为排障默认记录正文；前面的脱敏验收项仍需按实际日志与错误路径检查。
 `-c/--config` 虽可解析，但目前未应用到运行配置，不能用它切换模型或日志路径。
 
 ## 文档导航
