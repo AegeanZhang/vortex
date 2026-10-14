@@ -25,7 +25,6 @@ pub type ModelStream =
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelRequest {
-    //pub messages: Vec<SessionMessage>,
     pub items: Vec<ConversationItem>,
     pub tools: Vec<ToolSpec>,
 }

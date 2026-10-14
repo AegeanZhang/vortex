@@ -77,7 +77,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 }),
             );
 
-            //let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(MockWebSearch::new())];
             let metaso_api_key = env::var("METASO_API_KEY").map_err(|error| {
                 let message = match error {
                     env::VarError::NotPresent => "缺少环境变量 METASO_API_KEY, 请在启动前导出",

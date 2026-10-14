@@ -101,14 +101,6 @@ impl CoreEventStream {
     }
 }
 
-/*
-struct ActiveTurn {
-    receiver: tokio::sync::mpsc::Receiver<Result<ModelEvent, ProviderError>>,
-    content: String,
-    reasoning: String,
-    outcome: Option<Result<FinishReason, ProviderError>>,
-}
-*/
 struct ActiveTurn {
     receiver: tokio::sync::mpsc::Receiver<TurnProgress>,
 }
@@ -116,7 +108,6 @@ struct ActiveTurn {
 enum RuntimeInput {
     Shutdown,
     Command(Option<AgentCommand>),
-    //Model(Option<Result<ModelEvent, ProviderError>>),
     Turn(Option<TurnProgress>),
     ConsumerClosed,
 }
@@ -157,14 +148,6 @@ pub fn start_session(provider: Arc<dyn ModelProvider>, tools: ToolRegistry) -> S
         let mut status = SessionStatus::Idle;
         let mut turns = tokio::task::JoinSet::<Result<TurnOutput, TurnError>>::new();
         let mut active: Option<ActiveTurn> = None;
-
-        //let mut messages = Vec::<SessionMessage>::new();
-
-        // 任务只负责向通道转发事件，不再返回完整 String.
-        //let mut turns = tokio::task::JoinSet::<()>::new();
-
-        // 当前轮次的接收端、累积正文和待确认结果。
-        //let mut active: Option<ActiveTurn> = None;
 
         loop {
             // 处理进入等待之前就已经发生的关闭请求。
@@ -233,12 +216,6 @@ pub fn start_session(provider: Arc<dyn ModelProvider>, tools: ToolRegistry) -> S
                         continue;
                     }
 
-                    /*
-                    messages.push(SessionMessage {
-                        role: MessageRole::User,
-                        content: content.clone(),
-                    });
-                    */
                     history.push(ConversationItem::Message(SessionMessage {
                         role: MessageRole::User,
                         content: content.clone(),
@@ -266,55 +243,6 @@ pub fn start_session(provider: Arc<dyn ModelProvider>, tools: ToolRegistry) -> S
                         break;
                     }
 
-                    /*
-                    let request = ModelRequest {
-                        messages: messages.clone(),
-                    };
-                    */
-                    /*
-                    let request = ModelRequest {
-                        items: messages
-                            .iter()
-                            .cloned()
-                            .map(ConversationItem::Message)
-                            .collect(),
-                        tools: Vec::new(),
-                    };
-
-                    // 每轮都创建建独立通道
-                    let (turn_sender, turn_receiver) =
-                        tokio::sync::mpsc::channel::<Result<ModelEvent, ProviderError>>(32);
-
-                    active = Some(ActiveTurn {
-                        receiver: turn_receiver,
-                        content: String::new(),
-                        reasoning: String::new(),
-                        outcome: None,
-                    });
-
-                    // 必须 clone, 否则会把actor 持有的provider 移走。
-                    let provider = Arc::clone(&provider);
-
-                    turns.spawn(async move {
-                        let mut stream = provider.stream(request);
-
-                        while let Some(item) = stream.next().await {
-                            let terminal =
-                                matches!(&item, Ok(ModelEvent::Finished { .. }) | Err(_));
-
-                            if turn_sender.send(item).await.is_err() {
-                                return;
-                            }
-
-                            if terminal {
-                                return;
-                            }
-                        }
-
-                        // 退出时释放唯一 sender
-                        // 如果流没有提供终态， actor 会检测出来。
-                    });
-                    */
                     let (turn_sender, turn_receiver) =
                         tokio::sync::mpsc::channel::<TurnProgress>(32);
 
@@ -336,57 +264,6 @@ pub fn start_session(provider: Arc<dyn ModelProvider>, tools: ToolRegistry) -> S
                     break;
                 }
 
-                /*
-                RuntimeInput::Model(Some(item)) => {
-                    let turn = active
-                        .as_mut()
-                        .expect("model event requires an active turn");
-
-                    // 已经决定终态时, 不再接收后续正文。
-                    // 阶段 A 拒绝 Thinking 后，通道可能还有排队的事件。
-                    if turn.outcome.is_some() {
-                        continue;
-                    }
-
-                    match item {
-                        Ok(ModelEvent::TextDelta { delta }) => {
-                            // Core 累积完整回答，供成功后写入历史。
-                            turn.content.push_str(&delta);
-
-                            if !publish_event(
-                                &event_sender,
-                                &mut shutdown_receiver,
-                                CoreEvent::AssistantTextDelta { delta },
-                            )
-                            .await
-                            {
-                                break;
-                            }
-                        }
-
-                        Ok(ModelEvent::ReasoningDelta { .. }) => {
-                            // 阶段 A 尚未接入 Thinking 展示。
-                            turn.outcome = Some(Err(ProviderError::InvalidResponse(
-                                "reasoning output is not enabled in stage A".to_string(),
-                            )));
-
-                            // 停止接收新事件，并取消当前模型任务。
-                            turn.receiver.close();
-                            turns.abort_all();
-                        }
-
-                        Ok(ModelEvent::Finished { reason }) => {
-                            // 这里只记录结果，不立即设为 Idle。
-                            turn.outcome = Some(Ok(reason));
-                        }
-
-                        Err(error) => {
-                            // 同样等通道关闭后统一收尾。
-                            turn.outcome = Some(Err(error));
-                        }
-                    }
-                }
-                */
                 RuntimeInput::Turn(Some(TurnProgress::TextDelta { delta })) => {
                     if !publish_event(
                         &event_sender,
@@ -438,11 +315,9 @@ pub fn start_session(provider: Arc<dyn ModelProvider>, tools: ToolRegistry) -> S
                     }
                 }
 
-                //RuntimeInput::Model(None) => {
                 RuntimeInput::Turn(None) => {
                     // 通道已关闭且排队事件已消费完。
                     // take 会把 active 便会 None, 并交出本轮状态。
-                    //let turn = active
                     active
                         .take()
                         .expect("closed model channel requires an active turn");
@@ -464,78 +339,11 @@ pub fn start_session(provider: Arc<dyn ModelProvider>, tools: ToolRegistry) -> S
                             break;
                         }
 
-                        /*result = turns.join_next() => {
-                            result
-                        }*/
                         joined = turns.join_next() => {
                             joined
                         }
                     };
 
-                    /*
-                    let result: Result<String, ProviderError> = match (joined, turn.outcome) {
-                        (_, Some(Err(error))) => Err(error),
-
-                        (Some(Ok(())), Some(Ok(FinishReason::Stop))) => {
-                            if turn.content.is_empty() {
-                                Err(ProviderError::InvalidResponse(
-                                    "response does not contain assistant content".to_string(),
-                                ))
-                            } else {
-                                Ok(turn.content)
-                            }
-                        }
-
-                        (Some(Ok(())), Some(Ok(FinishReason::Length))) => {
-                            Err(ProviderError::InvalidResponse(
-                                "response was truncated by the output limit".to_string(),
-                            ))
-                        }
-
-                        (Some(Ok(())), Some(Ok(FinishReason::ContentFilter))) => {
-                            Err(ProviderError::InvalidResponse(
-                                "response was stopped by content filtering".to_string(),
-                            ))
-                        }
-
-                        (Some(Ok(())), None) => Err(ProviderError::InvalidResponse(
-                            "provider stream ended without a terminal event".to_string(),
-                        )),
-
-                        (Some(Err(_)), _) => Err(ProviderError::Transport(
-                            "provider task terminated unexpectedly".to_string(),
-                        )),
-
-                        (None, _) => Err(ProviderError::InvalidResponse(
-                            "provider task is missing".to_string(),
-                        )),
-                    };
-                    */
-
-                    /*
-                    let event = match result {
-                        Ok(content) => {
-                            // 成功回答只写入历史一次
-                            messages.push(SessionMessage {
-                                role: MessageRole::Assistant,
-                                content,
-                            });
-
-                            status = SessionStatus::Idle;
-                            CoreEvent::TurnCompleted
-                        }
-
-                        Err(error) => {
-                            // 失败的 Assistant 不进入请求历史。
-                            // 已经发给TUI的片段由 TUI 保留。
-                            status = SessionStatus::Failed;
-
-                            CoreEvent::TurnFailed {
-                                message: error.to_string(),
-                            }
-                        }
-                    };
-                    */
                     let event = match joined {
                         Some(Ok(Ok(output))) => {
                             history.push(ConversationItem::Message(output.assistant));

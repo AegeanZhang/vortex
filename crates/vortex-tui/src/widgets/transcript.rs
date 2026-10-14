@@ -148,27 +148,6 @@ impl Transcript {
     }
 
     fn render_lines(entries: &[TranscriptEntry]) -> Vec<Line<'_>> {
-        /*
-        let mut lines = Vec::new();
-
-        if entries.is_empty() {
-            lines.push(Line::from("Type a prompt and press Enter."));
-        } else {
-            for (index, entry) in entries.iter().enumerate() {
-                if index > 0 {
-                    lines.push(Line::default());
-                }
-
-                lines.push(Line::from(format!("{}:", entry.role.label())));
-
-                for content_line in entry.content.lines() {
-                    lines.push(Line::from(content_line));
-                }
-            }
-        }
-
-        lines
-        */
         if entries.is_empty() {
             return vec![Line::from("Type a prompt and press Enter.")];
         }
@@ -224,16 +203,6 @@ impl Transcript {
         frame.render_widget(paragraph.scroll((vertical_offset, 0)), content_area);
 
         if content_height > viewport_height {
-            /*
-            let mut scrollbar_state = ScrollbarState::new(content_height)
-                .position(self.scroll.offset)
-                .viewport_content_length(viewport_height);
-
-            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
-
-            frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
-            */
-
             let scroll_positions = self.max_offset().saturating_add(1);
 
             let mut scrollbar_state = ScrollbarState::new(scroll_positions)
@@ -278,30 +247,10 @@ impl Transcript {
     }
 
     pub(crate) fn page_up(&mut self) {
-        /*
-        let max_offset = self.max_offset();
-
-        if max_offset == 0 {
-            return;
-        }
-
-        self.scroll.offset = self.scroll.offset.saturating_sub(self.page_size());
-        self.scroll.follow_tail = false;
-        */
         self.scroll_up(self.page_size());
     }
 
     pub(crate) fn page_down(&mut self) {
-        /*let max_offset = self.max_offset();
-
-        self.scroll.offset = self
-            .scroll
-            .offset
-            .saturating_add(self.page_size())
-            .min(max_offset);
-
-        self.scroll.follow_tail = self.scroll.offset == max_offset;*/
-
         self.scroll_down(self.page_size());
     }
 

@@ -25,7 +25,7 @@ pub(crate) fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     let [header_area, main_area, status_area, prompt_area] = sections(frame.area());
 
     // 绘制顶部标题栏
-    let header = Paragraph::new("Rust TUI Demo").block(Block::default().borders(Borders::ALL));
+    let header = Paragraph::new("Vortex").block(Block::default().borders(Borders::ALL));
     frame.render_widget(header, header_area);
 
     state.transcript_mut().render(frame, main_area);
