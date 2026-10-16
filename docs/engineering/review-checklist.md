@@ -6,7 +6,7 @@
 
 - 改动是否只包含一个明确目的，是否夹带无关重构或格式化？
 - crate 职责和依赖方向是否符合 [`../architecture/overview.md`](../architecture/overview.md)？
-- 是否误让产品代码依赖 `playground/` 或让 `vortex-core` 依赖具体实现？
+- 是否误让产品代码依赖个人学习项目，或让 `vortex-core` 依赖具体实现？
 - 行为、设计与用户手册是否一致，是否把尚未实现的目标写成当前能力？
 
 ## 正确性与验证

@@ -92,15 +92,14 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 ## 用户手册
 
-- [`guide/getting-started.md`](guide/getting-started.md) —— 当前真实可运行的命令：构建、检查、运行实验。
+- [`guide/getting-started.md`](guide/getting-started.md) —— 当前真实可运行的命令：构建、检查、运行产品 TUI。
 
   **什么时候查**：刚接触这个仓库、想跑起来看看时。
 
 ## 两条约定
 
 **设计文档区分基线契约与后续目标，不维护独立进度表。** 当前完成到哪一步及验证结果
-以仓库根目录的 `README.md` 为准，
-各实验的进度记录在自己的计划文档里（如 `playground/tui-demo/docs/implementation-plan.md`）。
+以仓库根目录的 `README.md` 为准；编程语言练习由独立项目维护。
 描述代码接口时同步相关设计，并明确标注未实现的目标类型，避免把规划误当成现有 API。
 
 **用户手册只写实际验证过的内容。** 尚未实现的命令属于设计，写在 `design/` 下并标明目标形态，

@@ -1,6 +1,6 @@
 # 上手指南
 
-本文说明产品和实验的构建、运行入口。产品 TUI 使用文本 SSE、工具循环与秘塔网页搜索，
+本文说明 Vortex 的构建、运行入口。产品 TUI 使用文本 SSE、工具循环与秘塔网页搜索，
 正常搜索路径已由作者人工跑通，完整验证边界以根 README 为准。其他命令和后续能力的
 目标形态见 [`../design/cli-surface.md`](../design/cli-surface.md)，不要把设计文档中的
 未实现部分当成现有功能。
@@ -24,14 +24,8 @@ cargo build --locked
 ```
 
 根 Workspace 只包含 `crates/*`，所以 `cargo build` 和根目录的 `cargo build --workspace`
-都只编译产品 crate。实验使用独立的 `playground/Cargo.toml`：
-
-```bash
-cargo build --manifest-path playground/Cargo.toml --workspace --locked
-```
-
-产品使用根目录 `Cargo.lock` 和 `target/`；实验使用 `playground/Cargo.lock` 和
-`playground/target/`。两个锁文件都应提交，两个构建目录均被现有 Git 规则忽略。
+都只编译产品 crate。所有成员使用根目录 `Cargo.lock` 和 `target/`；锁文件应提交，
+构建目录被 Git 忽略。编程语言练习由独立项目维护，不属于本仓库。
 
 ## 提交前的检查
 
@@ -43,29 +37,6 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
 cargo build --release --locked
 ```
-
-以上命令只覆盖产品 Workspace。修改实验时单独检查：
-
-```bash
-cargo check --manifest-path playground/Cargo.toml --workspace --locked
-cargo test --manifest-path playground/Cargo.toml --workspace --locked
-```
-
-## 运行 TUI 实验
-
-```bash
-cargo run --manifest-path playground/Cargo.toml -p tui-demo
-```
-
-`playground/tui-demo` 是学习用的终端界面实验，会进入全屏备用屏幕，按 `q` 退出。
-它是交互式程序，需要真实终端，无法在管道或 CI 中验证。
-其分阶段方案与进度见 `playground/tui-demo/docs/implementation-plan.md`。
-
-Rust 入门实验使用 `cargo run --manifest-path playground/Cargo.toml -p hello-rust`。
-也可以先 `cd playground`，再运行 `cargo run -p tui-demo` 等短命令。
-
-如果 VS Code 在仓库根目录只加载了产品 Workspace，可单独打开 `playground/` 窗口来
-编辑实验；编辑器的项目加载与 Git 是否跟踪该目录是两回事。
 
 ## 产品命令的当前状态
 

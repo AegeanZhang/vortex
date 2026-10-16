@@ -82,18 +82,10 @@ crates/                    # 产品 crate
 ├── vortex-tui/            # 交互界面、状态更新与渲染
 ├── vortex-tools/          # 秘塔网页搜索实现，保留 MockWebSearch
 └── vortex-sandbox/        # 沙箱层占位 crate
-playground/                # 独立实验 workspace，不属于产品代码
-├── Cargo.toml             # 实验成员与共享依赖
-├── Cargo.lock             # 实验依赖锁文件
-├── hello-rust/            # Rust 入门练习
-└── tui-demo/              # ratatui + crossterm 终端界面实验
-    └── docs/implementation-plan.md   # 分阶段方案与进度
 ```
 
-`playground/` 下的 crate 只用于熟悉技术栈和验证方案，接口不做兼容承诺，产品实现开始后可能被替换或删除；各实验的进度记录在自己的计划文档里。
-
-产品和实验保留在同一 Git 仓库，但分别维护锁文件和构建目录。根目录的 `--workspace`
-只覆盖产品 crate；运行或检查实验时使用 `--manifest-path playground/Cargo.toml`。
+本仓库只维护产品 Workspace，统一使用根目录 `Cargo.lock` 和 `target/`。
+编程语言本身的学习与练习在独立项目中进行，不纳入本仓库。
 
 ## 配置与安全
 
@@ -105,7 +97,7 @@ playground/                # 独立实验 workspace，不属于产品代码
 
 ## 常用命令
 
-以下命令检查产品 workspace，并分别运行产品 TUI 和实验：
+以下命令检查产品 workspace，并运行产品 TUI：
 
 ```bash
 cargo fmt --all -- --check
@@ -115,7 +107,6 @@ export VORTEX_HOME="$PWD/.vortex"          # 必须为绝对路径，日志写�
 export QWEN_API_KEY='<your-api-key>'        # 仅在本地设置，不提交真实值
 export METASO_API_KEY='<your-search-key>'   # 秘塔搜索密钥，不复用模型密钥
 cargo run -p vortex-cli --locked           # 产品 TUI，输入 /exit 后 Enter 退出
-cargo run --manifest-path playground/Cargo.toml -p tui-demo # 运行 TUI 实验，按 q 退出
 ```
 
 产品不会主动读取 `.env`；本地开发脚本如需加载它，应先把变量导出到进程环境。当前 Provider
