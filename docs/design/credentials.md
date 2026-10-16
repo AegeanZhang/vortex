@@ -2,7 +2,7 @@
 
 本文档定义 Vortex 如何获取模型 Provider 与搜索工具的 API 密钥：密钥从哪里来、`.env` 的定位、配置文件中记录什么、日志如何脱敏。
 
-架构层面的 crate 划分见 [`../architecture/overview.md`](../architecture/overview.md)；命令行参数契约见 [`cli-surface.md`](cli-surface.md)；本文档取舍的依据见 [`../research/credential-handling-research.md`](../research/credential-handling-research.md)。
+架构层面的 crate 划分见 [`../architecture/overview.md`](../architecture/overview.md)；配置与路径契约见 [配置设计](configuration.md) 和 [安装设计](installation.md)，命令行参数见 [`cli-surface.md`](cli-surface.md)；本文档取舍的依据见 [`../research/credential-handling-research.md`](../research/credential-handling-research.md)。
 
 ## 设计前提
 
@@ -14,7 +14,7 @@ README 与 [架构总览](../architecture/overview.md) 约定："API 密钥只�
 | 约束 | 本设计 | 说明 |
 | --- | --- | --- |
 | 密钥不写进项目配置文件 | **采纳** | 项目配置会被提交、review、同步，写入密钥等于泄露。通用安全底线。 |
-| 密钥完全不落盘 | **采纳（更严格）** | Claude Code 与 Codex 均不遵守此条，它们把凭据存入系统钥匙串或用户级文件。见「代价」一节。 |
+| Vortex 不持久化凭据 | **采纳（更严格）** | 产品不保存 API key 或登录令牌；开发者自行注入环境变量与产品凭据存储是不同边界。见「代价」一节。 |
 
 ## 密钥来源
 
@@ -52,6 +52,8 @@ set -a; . ./.env; set +a
 加载尚未接入，Provider 地址/模型固定在 CLI；运行时日志路径由 VORTEX_HOME 环境变量
 提供，可以在被 Git 忽略的本地启动脚本中导出。不要把下面的目标配置示例当作现有解析能力。
 
+待实现的目标 HOME 默认是系统用户主目录下 `.vortex`，只有显式覆盖时才需要 VORTEX_HOME；不会因此自动读取 `.env`、新增凭据文件或搬迁已有开发目录。项目配置只在启动 cwd 下检查，不能改变 Provider 地址或密钥来源。
+
 ## 搜索服务凭据
 
 当前 TUI 装配秘塔搜索时，CLI 从进程环境读取 `METASO_API_KEY`，与模型的
@@ -67,19 +69,27 @@ sensitive，持密工具使用手写脱敏 `Debug`；搜索工具日志不输出
 
 ## Provider 配置形状
 
-配置文件记录**环境变量名**，不记录密钥值：
+以下是 [配置设计](configuration.md) 约定的目标片段，尚未接入当前代码。Provider 只定义连接和凭据变量名；模型与请求选项单独定义，不记录密钥值：
 
 ```toml
 [providers.deepseek]
 kind         = "openai-chat"          # OpenAI 兼容的 Chat Completions
 base_url     = "https://api.deepseek.com"
-model        = "deepseek-v4-flash"
 api_key_env  = "DEEPSEEK_API_KEY"     # 变量名，不是值
+
+[models.deepseek-pro]
+provider = "deepseek"
+model = "deepseek-v4-pro"             # 示例，须确认账户实际可用名称
+display_name = "DeepSeek Pro"
+supports_tools = true
+request_options = "plain"
 ```
 
 命名说明：Codex 中的对应字段为 `model_providers.<id>.env_key`；本项目用 `api_key_env`，语义相同，取其在脱离上下文时更自解释。
 
 配置解析阶段**不读取环境变量**，只记录变量名；实际取值推迟到构造 Provider 时。这样 `vortex config` 一类的配置检查、以及配置的单元测试，都不需要真实密钥存在。
+
+本轮不新增 `vortex config` 或登录命令。可以在用户层并列定义多个 Provider，通过所选模型 profile 引用其一；只读取实际选中模型的密钥。受限项目文件不能修改连接和凭据变量名，普通配置解析与会话内模型选择不承担认证流程。
 
 密钥缺失时的错误信息必须指出**缺少哪个环境变量名**，而非笼统的"认证失败"——变量名不是秘密，且这是最常见的上手障碍。
 
@@ -101,9 +111,9 @@ api_key_env  = "DEEPSEEK_API_KEY"     # 变量名，不是值
 
 ## 代价
 
-采纳"密钥完全不落盘"意味着 **OAuth 订阅登录不可实现**。Codex 的 ChatGPT 登录与 Claude Code 的 OAuth 都依赖凭据落盘（系统钥匙串或受保护的用户级文件）。
+当前 Vortex 只实现从进程环境读取 API key，不实现 OAuth 或订阅登录，也不持久化登录凭据。**OAuth 本身不要求凭据落盘**：可以仅在当前进程内保存令牌，但无法因此自动获得跨进程的登录复用能力。
 
-只要 Vortex 仅使用 API key，此代价为零。若将来要支持订阅账号登录，本约束必须重新评估——届时应参照两个参照物的做法：凭据进系统钥匙串或用户级受保护文件，而**不是**放宽"不写进项目配置文件"那一条。
+若将来要提供持久化订阅登录，应独立设计授权流程、令牌刷新与凭据存储，重新评估当前凭据策略；可参考系统钥匙串或受保护的用户级凭据文件，而**不是**放宽"不写进项目配置文件"那一条。模型配置与会话中的模型选择不承担登录职责；能否使用订阅权益还取决于服务方支持的授权接口与账号权限，不是增加一个配置字段就能实现。
 
 ## 分阶段落地
 
@@ -117,7 +127,7 @@ api_key_env  = "DEEPSEEK_API_KEY"     # 变量名，不是值
 
 - **凭据生成命令**：Claude Code 的 `apiKeyHelper` 由用户自定义命令动态生成凭据，适合短期令牌与轮换。它不违反"不落盘"约束，但需要先明确子进程的执行与超时策略。
 - **`env_http_headers`**：Codex 支持从环境变量填充自定义请求头。接入需要认证头的自建网关时会用到，当前无用例。
-- **多 Provider 同时配置**：目前设想是 `--provider <NAME>` 选择其一，未考虑同一次会话中混用多个 Provider 的情形。
+- **独立 Provider 选择参数**：目标 CLI 中的 `--provider` 与模型 profile 引用的组合规则以后再定；本轮仅通过 `-m` 和 `/model` 选择已有模型，不同时提供第二套 Provider 选择入口。
 
 ## 已否决的方案
 
@@ -126,4 +136,4 @@ api_key_env  = "DEEPSEEK_API_KEY"     # 变量名，不是值
 | 产品二进制读取 `.env` | 工作区中的 `.env` 可被陌生仓库携带，配合 `base_url` 构成静默劫持通道 |
 | 配置文件中直接写密钥值 | 项目配置会被提交与同步；Codex 虽保留 `experimental_bearer_token`，官方亦标注为不推荐 |
 | 命令行参数传入密钥 | 进入 shell 历史与进程列表，任何同机用户可见 |
-| `vortex login` 子命令 | 与"密钥不落盘"约束冲突，详见 `cli-surface.md` |
+| 本轮实现 `vortex login` 子命令 | 当前仅支持环境变量 API Key，不设计登录与凭据管理；不是断言 OAuth 技术上必须落盘 |

@@ -6,7 +6,8 @@
 | --- | --- | --- |
 | 语言与构建 | 稳定版 Rust、2024 edition、Cargo workspace | 本地与 CI 使用同一稳定工具链 |
 | 异步运行时 | Tokio | 异步代码不得阻塞 executor；阻塞操作需要隔离到专用线程或进程 |
-| 配置格式 | TOML | 用户级与项目级分层加载；密钥值不进入配置文件 |
+| 配置格式 | TOML | 内置/用户/受限项目/CLI 分层；模型请求选项属于模型 profile；密钥值不进入配置文件 |
+| 用户目录 | 统一 `.vortex` HOME | 默认系统用户主目录下 `.vortex`，VORTEX_HOME 可覆盖；CLI 统一解析路径，不按 XDG/AppData 分流 |
 | TUI | Ratatui + Crossterm | Ratatui 负责布局渲染，Crossterm 负责终端与事件；Tokio 统一事件循环 |
 | Transcript Markdown | tui-markdown | 仅 vortex-tui 使用，首版关闭默认 features，Assistant 正文按消息转换，User/Error 保持纯文本 |
 | HTTP | Reqwest | Provider 传输与真实网络工具的实现依赖，不进入 Core 公共接口；旧 exec 路径仍待迁移 |
@@ -18,6 +19,12 @@
 | Linux 沙箱 | Bubblewrap | 默认限制写入当前工作区并禁止网络 |
 
 TUI 选型依据见 [`../research/rust-tui-research.md`](../research/rust-tui-research.md)，CLI 和凭据相关决策分别见 [`../design/cli-surface.md`](../design/cli-surface.md) 与 [`../design/credentials.md`](../design/credentials.md)。
+
+## 安装与配置边界
+
+[安装设计](../design/installation.md) 与 [配置设计](../design/configuration.md) 定义本轮目标：CLI 通过标准库原生路径和用户目录 API 解析 HOME、cwd 与文件位置，日志初始化和 bootstrap 共用结果；Core 只依赖 TOML/Serde 与通用 URL 校验，不依赖具体 Provider 或终端库。TOML 仅需读取 features；具体依赖版本待实施时由产品锁文件确认。
+
+项目文件只检查启动 cwd，不向上查找、不自动定位 Git 根。产品默认值随程序发布，硬限制由校验与执行入口保证，首版不增加外置系统配置或管理员策略。默认 HOME、配置加载和 Windows 目录契约不表示已有 Windows 产品/沙箱验收；当前日志仍要求显式 VORTEX_HOME，待统一路径解析实施后迁移。
 
 ## Markdown 依赖与演进边界
 

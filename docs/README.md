@@ -24,6 +24,14 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 单个子系统的对外契约，是写代码时的直接依据。
 
+- [`design/installation.md`](design/installation.md) —— 安装入口与程序包、跨平台统一 `.vortex` HOME、cwd-only 项目路径、首次启动和目录生命周期；区分目标设计与当前部署能力。
+
+  **什么时候查**：设计安装、用户目录、日志位置或 Windows 路径适配时。
+
+- [`design/configuration.md`](design/configuration.md) —— 模型/搜索配置的产品契约：来源、优先级、受限项目字段、请求选项、配置来源诊断、硬限制与系统策略边界。
+
+  **什么时候查**：实现 config、HOME/日志入口迁移、`-m/-c` 或 `/model` 时；正式契约优先于本地实施稿。
+
 理解工具版 TUI 时，建议依次阅读 `session-runtime.md`、`agent-loop.md`、
 `streaming-response.md`、`tui-interface.md` 和 `message-building.md`：先看调度与工具循环，
 再看协议和界面投影，最后区分最小请求模型与后续上下文构建目标。

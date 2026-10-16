@@ -38,6 +38,8 @@ vortex-tools，由 CLI 选择、注册并传给 Session，不同时注册同名�
 模型/工具交替执行位于 Core 的 run_turn，
 Provider 只转换协议，TUI 只消费进度。接口见 [Agent loop](../design/agent-loop.md)。
 
+安装、HOME 和日志/配置路径由 CLI 统一解析，Core config 接收明确文件路径并负责加载、来源记录、合并与校验；不自行推导安装位置或系统用户目录。用户 HOME 统一为用户主目录下 `.vortex`，项目配置仅检查启动 cwd，不自动查找 Git 根；首版不增加系统配置文件层。以上为待实现契约，见 [安装设计](../design/installation.md) 与 [配置设计](../design/configuration.md)。
+
 库层返回保留上下文的结构化错误，CLI 层负责将其转换为面向用户的中文提示和稳定退出码。
 
 ## 横切约束
