@@ -64,10 +64,10 @@ pub async fn execute(task: String) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let response: ChatResponse = response.json().await?;
 
-    if let Some(choice) = response.choices.first() {
-        if let Some(content) = &choice.message.content {
-            println!("{content}");
-        }
+    if let Some(choice) = response.choices.first()
+        && let Some(content) = &choice.message.content
+    {
+        println!("{content}");
     }
 
     Ok(())
