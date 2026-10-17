@@ -1,5 +1,4 @@
 use std::{
-    env,
     error::Error,
     fs::{self, OpenOptions},
     io,
@@ -37,28 +36,24 @@ impl LoggingGuard {
     }
 }
 
+fn create_private_dir_all(path: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path)
+}
+
 pub(crate) fn init(
+    log_dir: &Path,
     _mode: RunMode,
     verbosity: u8,
     quiet: bool,
 ) -> Result<LoggingGuard, LoggingError> {
-    let vortex_home = env::var_os("VORTEX_HOME")
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "VORTEX_HOME is not set"))?;
-
-    let vortex_home = PathBuf::from(vortex_home);
-
-    if !vortex_home.is_absolute() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "VORTEX_HOME must be an absolute path",
-        )
-        .into());
-    }
-
-    let log_dir = vortex_home.join("logs");
-    fs::create_dir_all(&log_dir)?;
-
+    create_private_dir_all(log_dir)?;
     let log_path = log_dir.join("vortex.log");
 
     let mut options = OpenOptions::new();

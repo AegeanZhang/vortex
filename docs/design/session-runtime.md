@@ -12,11 +12,12 @@
 
 Session runtime 负责保存对话事实、串行化命令、调度模型/工具并发布语义事件。它不知道
 HTTP、OpenAI wire format 或终端控件。每次只运行一个 Turn，Turn 内可以串行经历多个
-模型请求和工具调用，支持增量正文和整个 Session 关闭；不包含 Thinking 展示、保留
-会话的 Turn 取消、持久化、恢复和模型切换。
+模型请求和工具调用，支持增量正文、空闲/失败时的会话内模型切换和整个 Session 关闭；
+不包含 Thinking 展示、保留会话的 Turn 取消、持久化或恢复。源码契约与完整验收不同，
+模型切换专项测试仍需补齐。
 
 ```text
-CLI：装配 Arc<dyn ModelProvider> 和 ToolRegistry，调用 start_session
+CLI：加载配置，装配 ModelManager 和 ToolRegistry，调用 start_session
                        │ SessionConnection
                        v
 TUI ──AgentHandle（命令 / 关闭信号）──> Session actor
@@ -36,24 +37,29 @@ TUI <────────CoreEventStream───────── Session 
 | 类型 | 当前职责 |
 | --- | --- |
 | `ModelProvider` | `stream(ModelRequest)` 返回惰性 `ModelStream`，流元素为 `Result<ModelEvent, ProviderError>` |
+| `ModelInfo` | 可安全显示的 profile ID、显示名、Provider/host、工具能力与不可选原因，不含凭据 |
+| `ModelFactory` | 返回模型目录，按 ID 本地构造 Provider；具体实现由 CLI 提供，不执行网络请求 |
+| `ModelManager` | 持有目录、当前模型和 Provider，构造成功后才原子替换绑定 |
 | `ModelRequest` | `items: Vec<ConversationItem>` 和 `tools: Vec<ToolSpec>`，不含厂商协议类型 |
 | `ModelEvent` | `TextDelta`、`ReasoningDelta`、完整 `ToolCall` 和携带 `FinishReason` 的 `Finished` |
 | `ToolRegistry` | 持有可用工具，稳定返回定义，执行并归一化结果 |
 | `SessionConnection` | 一次性交付初始 `SessionSnapshot`、命令句柄和独占事件流 |
+| `SessionSnapshot` | 初始 messages/status，以及已选 model 和 models 目录；不是实时更新对象 |
 | `AgentHandle` | 可克隆的命令入口；业务命令走有界 channel，Shutdown 走独立 watch 信号 |
 | `CoreEventStream` | 单消费者事件入口；隐藏接收端实现 |
-| `AgentCommand` | 当前只有 `SubmitPrompt` 和 `Shutdown` |
-| `CoreEvent` | 描述用户消息、Assistant 生命周期、工具开始/完成、Turn 完成/失败和命令拒绝 |
+| `AgentCommand` | `SubmitPrompt`、`SelectModel { model_id }` 和 `Shutdown` |
+| `CoreEvent` | 用户/Assistant、工具和 Turn 事件；普通拒绝与模型选择确认/拒绝分别表达 |
 
-`start_session(Arc<dyn ModelProvider>, ToolRegistry)` 创建容量为 32 的命令 channel 和容量为
+`start_session(ModelManager, ToolRegistry)` 创建容量为 32 的命令 channel 和容量为
 128 的事件 channel，并启动一个 Tokio task；每个 Turn 另建容量为 32 的 `TurnProgress`
 channel。无工具调用方使用 `ToolRegistry::empty()`；阶段 A 仍拒绝思考增量。
-初始 Snapshot 固定为空消息和 `Idle`；当前尚未实现
-历史恢复，因此这里还不承担“快照与订阅原子建立”的完整语义。
+初始 Snapshot 保存空消息、`Idle`、`models.current()` 与模型目录的副本；manager 本体随后
+移入 actor，后续变化通过事件通知。当前尚未实现历史恢复，因此这里还不承担恢复场景下
+“快照与订阅原子建立”的完整语义。
 
 ## 启动顺序与三个执行角色
 
-CLI 的 TUI 分支先调用 `start_session(provider, tools)`，再执行
+CLI 的 TUI 分支先经 bootstrap 调用 `start_session(models, tools)`，再执行
 `run(connection, tui_options).await`。两者不是“Session 执行完才启动 TUI”：
 
 1. `start_session` 创建 channel，通过 `tokio::spawn` 启动后台 Session loop，随后返回
@@ -63,6 +69,9 @@ CLI 的 TUI 分支先调用 `start_session(provider, tools)`，再执行
 3. Session 接受有效 Prompt 后，通过 `turns.spawn(run_turn(...))` 创建本轮任务。它消费
    Provider 流、执行工具并在必要时再次请求模型；Turn 结束后退出，不是随 Session
    一直运行的第三个长期循环。
+
+进入 Session 前，CLI 已完成路径/日志初始化、阻塞池中的 TOML 加载、来源报告、工具装配
+和初始模型构造；需要的 API key 在本地装配时读取。TUI 不读取配置或密钥。
 
 | 执行角色 | 消费什么 | 生产什么 |
 | --- | --- | --- |
@@ -89,7 +98,8 @@ CLI 的 TUI 分支先调用 `start_session(provider, tools)`，再执行
 3. Session loop 的 `tokio::select!` 通过 `command_receiver.recv()` 接收命令，包装为
    `RuntimeInput::Command`，再交给下面的 `match input` 分派处理。
 4. `SubmitPrompt` 分支校验输入和 Session 状态。拒绝时发布 `CommandRejected`；接受时
-   保存 User、发布开始事件，再将历史副本和工具注册表交给本轮 `run_turn`。
+   保存 User、发布开始事件，通过 `models.provider()` 获取当前 Provider 的 Arc 克隆，
+   再将它、历史副本和工具注册表交给本轮 `run_turn`。
 5. `run_turn` 构建每个模型步骤的请求，通过 `stream.next().await` 读取增量、必要时执行
    工具，用 `turn_sender` 发送 TurnProgress。Session 在 `active.receiver.recv()` 分支
    接收，记录完成的工具步骤并发布对应 CoreEvent；最终 Assistant 由任务返回值提交。
@@ -105,6 +115,25 @@ Session 通过关闭标志检查或 `shutdown_receiver.changed()` 响应。这�
 [`session.rs`](../../crates/vortex-core/src/session.rs) 的 `AgentHandle::send`、
 `start_session`、`match input`，即可沿上述路径定位。
 
+## 模型切换
+
+`SelectModel { model_id }` 与 Prompt 共用业务命令队列。actor 在 Running 或仍有 ActiveTurn
+时发布 `ModelSelectionRejected { model_id, message }`，不排队等待 Turn 完成后自动切换。
+TUI 的本地检查不能代替这里的校验，因为界面状态可能滞后。
+
+非 Running 且无活跃 Turn 时调用 `models.select(id)`：检查目录/能力，调用 Factory 本地
+构造 Provider，成功后一起替换当前 ModelInfo 和 Provider，发布 `ModelSelected { model }`。
+不存在、能力不符或缺密钥等失败发布专用拒绝事件，保留原绑定。同 ID 幂等成功，不重新
+构造实例，但仍发布确认；不要复用普通 CommandRejected，否则 UI 无法可靠结束 pending。
+
+选择不产生 User/Assistant、不清空历史、不修改 SessionStatus、不发 TurnCompleted，也不
+写配置。搜索工具注册表仍使用启动配置。每次 SubmitPrompt 获取当时的 Provider，整个
+Turn 的模型/工具往返固定使用该 Arc，不将可变 ModelManager 传进 run_turn。
+
+切换 Provider 后，下一轮会把保留的历史发送给新服务；成功确认仅表示本地装配成功，
+不代表远端鉴权或模型可用性已验证。网络错误仍由下一次 Turn 的正常失败链处理。
+选择事件同样经过可被 Shutdown 中断的 publish_event，不新增第二套事件通道或关闭机制。
+
 ## 所有权与并发
 
 ### start_session 返回后的任务归属
@@ -113,7 +142,7 @@ Session 通过关闭标志检查或 `shutdown_receiver.changed()` 响应。这�
 函数返回不会结束后台任务：`tokio::spawn` 已将任务交给 Tokio runtime 持有并调度，
 任务的生命周期不再依附于这次函数调用的栈帧。
 
-- `async move` 将 `command_receiver`、`event_sender`、`shutdown_receiver`、`provider`
+- `async move` 将 `command_receiver`、`event_sender`、`shutdown_receiver`、`models`
   和 `tools` 等捕获值移入任务；内部创建的 `history`、`status`、`active` 和 `turns` 也由任务
   持有。等待 channel 时这些状态仍保留，不是继续借用已经返回的函数栈。
 - `tokio::spawn` 返回 `JoinHandle`，可用于等待任务结果或请求中止。当前代码没有保存它；
@@ -137,7 +166,7 @@ Session task 若 panic 并展开栈，JoinSet 的析构也会请求中止子任�
 
 ### Session 内部状态与并发边界
 
-Session actor 独占 `history`、`status`、`ActiveTurn` 和
+Session actor 独占 `ModelManager`、`history`、`status`、`ActiveTurn` 和
 `JoinSet<Result<TurnOutput, TurnError>>`，其他模块不能直接修改这些状态。
 事件循环使用 `tokio::select!` 等待命令、TurnProgress、关闭信号和
 UI 消费者关闭；先得到 `RuntimeInput`，再更新状态，避免跨分支借用活跃 Turn。
@@ -146,6 +175,7 @@ UI 消费者关闭；先得到 `RuntimeInput`，再更新状态，避免跨分�
   的 Assistant 前缀/调用/结果，以及最终成功 Assistant。
 - `status` 为 `Running` 时拒绝新的 Prompt，因此逻辑上最多只有一个活跃 Turn。
 - `ActiveTurn` 只保存 TurnProgress 接收端；不再累积正文或保存模型 outcome。
+- 初始模型和目录先克隆到 snapshot；manager 的所有后续选择只能由 actor 串行处理。
 - `run_turn` 独占进度发送端，累积每个模型步骤的正文并维护本地 `context`；不直接修改
   Session 权威历史。工具步骤通过 ToolFinished 回填，最终回答通过 TurnOutput 返回。
 - actor 等进度通道排空并关闭，再 `join_next()` 回收任务；只有正常返回 `Ok(TurnOutput)`
@@ -196,7 +226,10 @@ Provider 错误、缺少终态、task 异常、Length、ContentFilter、空最�
 OpenAI-compatible Chat Completions 的 `user`、`assistant`、`system`，发送
 `stream: true`，将 SSE choice 0 的正文转换为 TextDelta，并组装单个完整 ToolCall。
 请求中的工具定义/调用/结果映射见 [Agent loop](agent-loop.md)。泛用构造器省略千问专用参数；
-CLI 用 `QwenThinkingOptions` 显式关闭思考及思考历史。仅改变该开关不能完成 Thinking 接入。
+CLI 工厂按模型 profile 的 `request_options` 映射：`plain` 不带 Qwen 扩展，`qwen-stage-a`
+用 `QwenThinkingOptions` 显式关闭思考及思考历史；后者也是内置 Qwen profile 的预设。
+同 Provider 的不同模型不共用请求选项。工厂注入共享 Reqwest client，Core 不依赖其类型。
+仅改变思考开关不能完成 Thinking 接入。
 
 Provider 负责 HTTP 状态、SSE Content-Type、分帧与 JSON 校验，并要求合法 `finish_reason`
 加 `[DONE]` 才产生 Finished。等待响应头上限为 30 秒，每次等待下一个 body chunk 的空闲
@@ -222,6 +255,10 @@ Provider 负责 HTTP 状态、SSE Content-Type、分帧与 JSON 校验，并要�
 | 同上 | 阶段 A 收到 ReasoningDelta | run_turn 立即返回错误，释放流，不再读取后续正文 |
 | 同上 | `Shutdown` 与背压 | 活跃流及阻塞的事件发送可被中断，事件流最终关闭 |
 | 同上 | 工具步骤后模型失败 | 保留完成的前缀/调用/结果，失败部分正文不入历史 |
+| 同上 | 空闲/Failed 切换后再提交 | 下一轮使用新 Provider，历史只带一次，不新增 slash 消息 |
+| 同上 | Running 拒绝、未知/不可用/缺密钥、相同 ID | 专用结果事件，失败保留原绑定；同 ID 也确认 |
+| 同上 | 模型确认发布遇到背压 | Shutdown 仍能结束；选择不改 status 或配置文件 |
+| `vortex-core/src/model.rs` | 目录与实例绑定 | 重复 ID 拒绝、同 ID 幂等、失败不部分更新 |
 | `vortex-core/src/agent_loop.rs`、`tool.rs` | 工具闭环与异常 | 结果回填、错误恢复、轮数和 ID 校验；详见 agent-loop.md |
 | `vortex-provider/src/openai_chat/request.rs` | 请求映射 | role/content、工具定义与结果正确，stream 为 true，千问开关按显式选项写入 |
 | `src/openai_chat/decoder.rs`、`src/sse_transport.rs` | HTTP/SSE 异常与结束 | 状态码、Content-Type、坏 JSON、缺 DONE、超时映射正确；统计包不结束模型步骤 |
@@ -235,5 +272,5 @@ Provider 负责 HTTP 状态、SSE Content-Type、分帧与 JSON 校验，并要�
 ## 后续演进
 
 Thinking 需要增加 Core 的思考事件及 TUI 投影；思考历史还需单独扩展消息结构，具体规则
-见流式响应设计。CancelTurn、恢复历史、工具详情/审批事件和模型切换也应先扩展 Core
+见流式响应设计。CancelTurn、恢复历史、工具详情/审批事件等仍应先扩展 Core
 契约，再由 CLI 或 TUI 使用，不能把厂商响应或界面状态塞进 `CoreEvent`。

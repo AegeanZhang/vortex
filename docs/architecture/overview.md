@@ -38,7 +38,12 @@ vortex-tools，由 CLI 选择、注册并传给 Session，不同时注册同名�
 模型/工具交替执行位于 Core 的 run_turn，
 Provider 只转换协议，TUI 只消费进度。接口见 [Agent loop](../design/agent-loop.md)。
 
-安装、HOME 和日志/配置路径由 CLI 统一解析，Core config 接收明确文件路径并负责加载、来源记录、合并与校验；不自行推导安装位置或系统用户目录。用户 HOME 统一为用户主目录下 `.vortex`，项目配置仅检查启动 cwd，不自动查找 Git 根；首版不增加系统配置文件层。以上为待实现契约，见 [安装设计](../design/installation.md) 与 [配置设计](../design/configuration.md)。
+安装、HOME 和日志/配置路径由 CLI 统一解析，Core config 接收明确文件路径并负责加载、来源记录、合并与校验；不自行推导安装位置或系统用户目录。用户 HOME 默认是用户主目录下 `.vortex`，项目配置只检查启动 cwd，不自动查找 Git 根；首版不增加系统配置文件层。此链路已接入 TUI，跨平台和专项验收边界见根 README；契约见 [安装设计](../design/installation.md) 与 [配置设计](../design/configuration.md)。
+
+Core 的 ModelManager 持有模型目录、当前模型元数据和 `Arc<dyn ModelProvider>`，通过
+ModelFactory trait 请求本地构造实例；CLI ConfiguredModelFactory 才认识连接、请求选项和
+凭据读取。Session actor 独占 manager，切换成功后发确认，每个 Turn 获取固定 Provider；
+TUI 只保存目录/当前模型的展示副本及 pending，不反向调用具体实现，也不写配置。
 
 库层返回保留上下文的结构化错误，CLI 层负责将其转换为面向用户的中文提示和稳定退出码。
 

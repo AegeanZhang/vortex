@@ -30,14 +30,15 @@ vortex/
 
 | crate | 阅读入口 |
 | --- | --- |
-| vortex-core | `conversation.rs` 语义历史、`provider.rs` 模型接口、`tool.rs` 工具接口与注册表、`agent_loop.rs` 多步执行、`session.rs` actor |
+| vortex-core | `config.rs` 配置合并/校验、`model.rs` 模型目录/绑定、`conversation.rs` 历史、`provider.rs`/`tool.rs` 接口、`agent_loop.rs` 多步执行、`session.rs` actor |
 | vortex-provider | `openai_chat/mod.rs` 装配、`request.rs` 请求映射、`decoder.rs` 增量组装、`stream.rs` 流连接；`sse_transport.rs` 负责传输 |
 | vortex-tools | `metaso_web_search.rs` 及子模块负责秘塔 HTTP 与请求/结果映射；`mock_web_search.rs` 保留固定结果学习用途 |
-| vortex-cli | `main.rs` Provider/Tool 装配、`logging.rs` 日志；`exec.rs` 是待迁移的旧单次路径 |
-| vortex-tui | `event_loop.rs` 与 `app.rs` 消费 CoreEvent，`widgets/` 渲染局部状态 |
+| vortex-cli | `main.rs` 参数/模式、`paths.rs` 目录、`logging.rs` 日志、`bootstrap.rs` 加载/工具装配、`model_factory.rs` 模型装配；`exec.rs` 仍为旧单次路径 |
+| vortex-tui | `event_loop.rs` 与 `app.rs` 消费 CoreEvent，`command.rs` 解析 slash，`widgets/model_picker.rs` 等控件渲染局部状态 |
 
 历史、执行与 wire 请求之间的边界见 [Session](../design/session-runtime.md) 和
-[Agent loop](../design/agent-loop.md)；目录入口不表示配置、权限等目标模块已经实现。
+[Agent loop](../design/agent-loop.md)；配置与模型切换的接入及测试边界见根 README，权限等
+后续目标不能仅凭目录存在视为已实现。
 
 ## Workspace 约定
 

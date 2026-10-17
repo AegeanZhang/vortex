@@ -35,8 +35,17 @@ impl OpenAiChatProvider {
         model: impl Into<String>,
         api_key: impl Into<String>,
     ) -> Self {
+        Self::from_client(reqwest::Client::new(), base_url, model, api_key)
+    }
+
+    pub fn from_client(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+        model: impl Into<String>,
+        api_key: impl Into<String>,
+    ) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client,
             base_url: base_url.into(),
             model: model.into(),
             api_key: SecretString(api_key.into()),

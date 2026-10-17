@@ -18,6 +18,23 @@ use response::normalize_response;
 
 const ENDPOINT: &str = "https://metaso.cn/api/v1/search";
 
+#[derive(Debug, Clone, Copy)]
+pub struct MetasoSearchOptions {
+    pub max_results: usize,
+    pub connect_timeout: Duration,
+    pub request_timeout: Duration,
+}
+
+impl Default for MetasoSearchOptions {
+    fn default() -> Self {
+        Self {
+            max_results: 5,
+            connect_timeout: Duration::from_secs(5),
+            request_timeout: Duration::from_secs(20),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Limits {
     request_timeout: Duration,
@@ -38,6 +55,7 @@ pub struct MetasoWebSearch {
     authorization: HeaderValue,
     endpoint: String,
     limits: Limits,
+    max_results: usize,
 }
 
 impl fmt::Debug for MetasoWebSearch {
@@ -50,6 +68,7 @@ impl fmt::Debug for MetasoWebSearch {
 }
 
 impl MetasoWebSearch {
+    /*
     pub fn new(api_key: String) -> Result<Self, ToolError> {
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(5))
@@ -85,13 +104,77 @@ impl MetasoWebSearch {
             limits,
         })
     }
+    */
+    pub fn new(api_key: String) -> Result<Self, ToolError> {
+        Self::new_with_options(api_key, MetasoSearchOptions::default())
+    }
+
+    pub fn new_with_options(
+        api_key: String,
+        options: MetasoSearchOptions,
+    ) -> Result<Self, ToolError> {
+        if !(1..=5).contains(&options.max_results)
+            || !(Duration::from_secs(1)..=Duration::from_secs(30))
+                .contains(&options.connect_timeout)
+            || !(Duration::from_secs(1)..=Duration::from_secs(120))
+                .contains(&options.request_timeout)
+            || options.connect_timeout > options.request_timeout
+        {
+            return Err(ToolError::Execution("秘塔搜索数量或超时选项越界".into()));
+        }
+        let client = Client::builder()
+            .connect_timeout(options.connect_timeout)
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
+            .build()
+            .map_err(|_| ToolError::Execution("秘塔 HTTP 客户端初始化失败".into()))?;
+        Self::from_parts(
+            client,
+            api_key,
+            ENDPOINT.into(),
+            Limits {
+                request_timeout: options.request_timeout,
+                max_response_bytes: 256 * 1_024,
+            },
+            options.max_results,
+        )
+    }
+
+    // 保留私有测试构造点；本地测试可传 HTTP endpoint 和毫秒级超时。
+    fn from_parts(
+        client: Client,
+        api_key: String,
+        endpoint: String,
+        limits: Limits,
+        max_results: usize,
+    ) -> Result<Self, ToolError> {
+        if !(1..=5).contains(&max_results) {
+            return Err(ToolError::Execution("秘塔搜索数量必须在 1..=5".into()));
+        }
+        let key = api_key.trim();
+        if key.is_empty() || key.chars().any(char::is_whitespace) {
+            return Err(ToolError::Execution(
+                "搜索 API key 为空或包含空白字符".into(),
+            ));
+        }
+        let mut authorization = HeaderValue::from_str(&format!("Bearer {key}"))
+            .map_err(|_| ToolError::Execution("搜索 API key 格式无效".into()))?;
+        authorization.set_sensitive(true);
+        Ok(Self {
+            client,
+            authorization,
+            endpoint,
+            limits,
+            max_results,
+        })
+    }
 
     async fn search(&self, query: &str) -> Result<String, ToolError> {
         let response = self
             .client
             .post(&self.endpoint)
             .header(AUTHORIZATION, self.authorization.clone())
-            .json(&MetasoSearchRequest::new(query))
+            .json(&MetasoSearchRequest::new(query, self.max_results))
             .send()
             .await
             .map_err(transport_error)?;
@@ -123,7 +206,7 @@ impl MetasoWebSearch {
         }
 
         let body = read_limited_body(response, self.limits.max_response_bytes).await?;
-        let output = normalize_response(&body, query)?;
+        let output = normalize_response(&body, query, self.max_results)?;
         tracing::debug!(
             backend = "metaso",
             response_bytes = body.len(),

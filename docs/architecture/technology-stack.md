@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | 语言与构建 | 稳定版 Rust、2024 edition、Cargo workspace | 本地与 CI 使用同一稳定工具链 |
 | 异步运行时 | Tokio | 异步代码不得阻塞 executor；阻塞操作需要隔离到专用线程或进程 |
-| 配置格式 | TOML | 内置/用户/受限项目/CLI 分层；模型请求选项属于模型 profile；密钥值不进入配置文件 |
+| 配置解析与校验 | TOML + Serde + url | Core 负责内置/用户/受限项目/CLI 合并，URL 结构校验不执行网络；模型请求选项属于模型 profile，密钥值不进配置 |
 | 用户目录 | 统一 `.vortex` HOME | 默认系统用户主目录下 `.vortex`，VORTEX_HOME 可覆盖；CLI 统一解析路径，不按 XDG/AppData 分流 |
 | TUI | Ratatui + Crossterm | Ratatui 负责布局渲染，Crossterm 负责终端与事件；Tokio 统一事件循环 |
 | Transcript Markdown | tui-markdown | 仅 vortex-tui 使用，首版关闭默认 features，Assistant 正文按消息转换，User/Error 保持纯文本 |
@@ -22,9 +22,22 @@ TUI 选型依据见 [`../research/rust-tui-research.md`](../research/rust-tui-re
 
 ## 安装与配置边界
 
-[安装设计](../design/installation.md) 与 [配置设计](../design/configuration.md) 定义本轮目标：CLI 通过标准库原生路径和用户目录 API 解析 HOME、cwd 与文件位置，日志初始化和 bootstrap 共用结果；Core 只依赖 TOML/Serde 与通用 URL 校验，不依赖具体 Provider 或终端库。TOML 仅需读取 features；具体依赖版本待实施时由产品锁文件确认。
+[安装设计](../design/installation.md) 与 [配置设计](../design/configuration.md) 定义首版边界：
+CLI 的 AppPaths 通过标准库原生路径/用户目录 API 解析 HOME、cwd 和文件位置，日志与
+bootstrap 共用结果；Core config 接收明确路径，读取放到 Tokio 阻塞池，合并/校验保持
+协议无关。Core 不依赖 Reqwest、具体 Provider 或终端类型。
 
-项目文件只检查启动 cwd，不向上查找、不自动定位 Git 根。产品默认值随程序发布，硬限制由校验与执行入口保证，首版不增加外置系统配置或管理员策略。默认 HOME、配置加载和 Windows 目录契约不表示已有 Windows 产品/沙箱验收；当前日志仍要求显式 VORTEX_HOME，待统一路径解析实施后迁移。
+Workspace 声明 `toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }`
+和 `url = "2.5.8"`，解析使用 `toml::from_str`，不为普通配置开启写回/display features。
+CLI 工厂直接使用 URL host 校验，需自行声明 url 依赖；Core/CLI 的 tempfile dev-dependency
+用于隔离文件测试。实际版本仍由根 Cargo.lock 固定，依赖存在不代表专项测试已补齐。
+
+Core 定义 ModelFactory/ModelManager，只认识元数据和 Provider trait；CLI 的
+ConfiguredModelFactory 映射模型级 request_options、按需读取 key，并注入共享 Reqwest
+client。模型 client 和秘塔 client 均关闭自动重定向与隐式重试；Factory 只本地装配，不
+执行探测请求，不承担 OAuth/订阅登录。
+
+项目文件只检查启动 cwd，不向上查找、不自动定位 Git 根。产品默认值随程序发布，硬限制由校验与执行入口保证，首版不增加外置系统配置或管理员策略。默认 HOME 与配置加载已接入，日志不再要求必须设置 VORTEX_HOME；Windows/macOS 的目录、权限和整个产品仍需原生验收，不能由 Linux 编译推断。
 
 ## Markdown 依赖与演进边界
 
@@ -59,6 +72,6 @@ Tokio 的 `time` feature 用于搜索超时。Mock 搜索不发网络请求；�
 搜索契约见 [Agent loop 与搜索工具](../design/agent-loop.md)，候选比较见 [调研](../research/web-search-research.md)。
 
 CLI 初始化非阻塞 JSON 文件日志，WorkerGuard 保持到 main 结束；日志路径为
-`$VORTEX_HOME/logs/vortex.log`。RUST_LOG 与 verbose 的实际优先级、TRACE 输入风险见
-[上手指南](../guide/getting-started.md#日志与本地配置)。配置 TOML、JSONL 会话与 MCP/
-Bubblewrap 仍是确定的目标选型，不是可由依赖表推断出的现有能力。
+`<vortex-home>/logs/vortex.log`，HOME 来自统一路径解析。RUST_LOG 与 verbose 的实际优先级、
+TRACE 输入风险见 [上手指南](../guide/getting-started.md#日志与本地配置)。TOML 已接入 TUI；
+JSONL 会话、MCP/Bubblewrap 仍是后续目标，不能由依赖表推断能力已经可用。

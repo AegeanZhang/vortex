@@ -1,14 +1,13 @@
+mod bootstrap;
 mod exec;
 mod logging;
+mod model_factory;
+mod paths;
 
 use clap::{Parser, Subcommand};
 use exec::execute;
-use std::{env, error::Error, sync::Arc};
+use std::{env, error::Error};
 
-use vortex_core::{Tool, ToolRegistry, start_session};
-use vortex_provider::{OpenAiChatProvider, QwenThinkingOptions};
-//use vortex_tools::MockWebSearch;
-use vortex_tools::MetasoWebSearch;
 use vortex_tui::options::TuiOptions;
 use vortex_tui::run;
 
@@ -22,6 +21,9 @@ struct Cli {
     /// Override a TOML configuration value
     #[arg(short, long, global = true, value_name = "KEY=VALUE")]
     config: Vec<String>,
+
+    #[arg(short = 'm', long, global = true, value_name = "MODEL_ID")]
+    model: Option<String>,
 
     /// Subcommand
     #[command(subcommand)]
@@ -38,12 +40,14 @@ enum Commands {
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let cli = Cli::parse();
 
+    let paths = paths::AppPaths::resolve()?;
+
     let run_mode = match &cli.command {
         Some(Commands::Exec { .. }) => logging::RunMode::Exec,
         None => logging::RunMode::Tui,
     };
 
-    let logging_guard = logging::init(run_mode, u8::from(cli.verbose), false)?;
+    let logging_guard = logging::init(&paths.log_dir, run_mode, u8::from(cli.verbose), false)?;
 
     tracing::info!(
         mode = run_mode.as_str(),
@@ -54,17 +58,24 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     match cli.command {
         Some(Commands::Exec { prompt }) => {
+            if cli.model.is_some() || !cli.config.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "模型/搜索配置当前仅接入 TUI；exec 暂不支持 -m/-c",
+                )
+                .into());
+            }
             execute(prompt).await?;
         }
         None => {
             //let api_key = env::var("DEEPSEEK_API_KEY")?;
-            let api_key = env::var("QWEN_API_KEY")?;
+            //let api_key = env::var("QWEN_API_KEY")?;
 
             /*let provider = Arc::new(OpenAiChatProvider::new(
                 "https://api.deepseek.com",
                 "deepseek-v4-pro",
                 api_key,
-            ));*/
+            ));
             let provider = Arc::new(
                 OpenAiChatProvider::new(
                     "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -93,8 +104,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
             let connection = start_session(provider, tools);
             let tui_options = TuiOptions { color: None };
-
-            run(connection, tui_options).await?;
+            */
+            let connection = bootstrap::start_tui_session(&paths, cli.config, cli.model).await?;
+            run(connection, TuiOptions { color: None }).await?;
         }
     }
 

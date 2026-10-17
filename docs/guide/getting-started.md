@@ -1,7 +1,9 @@
 # 上手指南
 
 本文说明 Vortex 的构建、运行入口。产品 TUI 使用文本 SSE、工具循环与秘塔网页搜索，
-正常搜索路径已由作者人工跑通，完整验证边界以根 README 为准。其他命令和后续能力的
+此前搜索正常路径已由作者人工跑通。本轮分层配置与模型选择已接入源码并通过编译/Review，
+专项测试与真实交互验收仍待补充；以下配置用法描述当前代码，不表示新链路已人工跑通。
+完整验证边界以根 README 为准。其他命令和后续能力的
 目标形态见 [`../design/cli-surface.md`](../design/cli-surface.md)，不要把设计文档中的
 未实现部分当成现有功能。
 
@@ -40,33 +42,114 @@ cargo build --release --locked
 
 ## 产品命令的当前状态
 
-当前 TUI 装配千问 Provider 与秘塔搜索工具，启动前将两份独立的 API key 导出到进程环境。
-下面的值仅是占位示例，不要提交真实密钥：
+没有配置文件时，内置默认值仍为 Qwen profile `qwen-max` 和秘塔搜索。此默认路径需要
+两份独立 key；下面只是占位示例，不要提交真实值，也不要自动运行真实付费请求：
 
 ```bash
-export VORTEX_HOME="$PWD/.vortex"
 export QWEN_API_KEY='<your-api-key>'
 export METASO_API_KEY='<your-search-key>'
 cargo run -p vortex-cli --locked
 ```
 
 产品本身不读取 `.env`。输入 Prompt 后按 Enter 提交，输入 `/exit` 后按 Enter 退出。
-当前 Ctrl+C 映射已被注释；Provider URL 与模型暂由 CLI 固定装配，千问思考和思考历史均
-显式关闭。VORTEX_HOME 必须是非空绝对路径，日志初始化失败会在启动 TUI 之前返回错误。
-上面的 `.vortex/logs/` 已被 Git 忽略；真实模型与终端验收记录以根 README 为准。
+当前没有 Ctrl+C 退出映射；内置 Qwen profile 使用 `qwen-stage-a` 请求选项，显式关闭
+思考及思考历史。模型连接和搜索选项来自分层 TOML，不再要求修改 CLI 源码。
+HOME 默认是原生用户主目录下 `.vortex`，无需设置 VORTEX_HOME；显式覆盖必须为非空
+绝对路径，例如 `export VORTEX_HOME="${HOME}/.vortex-dev"`。启动时在进入 TUI 前显示
+cwd、HOME、两条配置路径及 loaded/missing 状态、最终模型/Provider/host。
+
+配置缺失使用内置值，不自动创建配置模板；只创建必要日志目录。坏配置、缺少实际需要的
+key 或日志初始化失败会在进入 TUI 前报错。真实模型与终端验收记录以根 README 为准。
+
+### 用户配置与受限项目配置
+
+用户文件为 `<vortex-home>/config.toml`：Linux/macOS 通常是 `~/.vortex/config.toml`，
+Windows 原生是用户主目录下 `.vortex\config.toml`，WSL 默认使用自己的用户目录。
+以下是完整用户配置示例；远端模型名应以账户实际开通情况为准：
+
+```toml
+default_model = "qwen-max"
+
+[providers.qwen]
+kind = "openai-chat"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key_env = "QWEN_API_KEY"
+
+[models.qwen-max]
+provider = "qwen"
+model = "qwen3.8-max"
+display_name = "Qwen Max"
+supports_tools = true
+request_options = "qwen-stage-a"
+
+[search]
+enabled = true
+backend = "metaso"
+api_key_env = "METASO_API_KEY"
+max_results = 5
+connect_timeout_secs = 5
+request_timeout_secs = 20
+```
+
+Provider 定义连接和密钥变量名；模型 profile 定义服务端名称、能力和请求选项。可按相同
+结构添加多个 profile，再用 `-m` 或 `/model` 选择其 ID，不直接输入服务端模型名。
+`supports_tools` 是用户声明而非远端探测；启用搜索时所选模型必须声明支持工具调用。
+`plain` 省略 Qwen 扩展，不代表已实现 Thinking；当前文本阶段仍拒绝思考增量。
+
+项目文件只检查启动 cwd 下的 `.vortex/project.toml`，不读取父目录或 Git 根。示例：
+
+```toml
+default_model = "qwen-max"
+
+[search]
+enabled = false
+max_results = 3
+```
+
+项目只能引用已有模型、关闭搜索或降低用户层的条数，不能新增 endpoint、凭据变量名、
+模型或请求预设。项目目录/文件不允许符号链接；完整信任系统和 Windows junction 验收
+尚未完成。用户 HOME 默认可信，不要将陌生仓库中的 `.vortex` 指定为用户配置来源。
+
+优先级是内置 → 用户 → 受限项目 → 重复 `-c`（后者优先）→ `-m`。用户层同 ID 条目
+整条替换；配置在启动时读取一次，修改后需重启，不自动写回。
+
+### 启动覆盖与会话内模型选择
+
+下列命令仍需要选中模型的 key，但关闭搜索或显式 Mock 不读取秘塔 key：
+
+```bash
+cargo run -p vortex-cli --locked -- -m qwen-max -c 'search.enabled=false'
+cargo run -p vortex-cli --locked -- -c 'search.enabled=true' -c 'search.backend="mock"'
+# 使用秘塔时才生效；search.enabled 仍须为 true，且需要搜索 key。
+cargo run -p vortex-cli --locked -- -c 'search.max_results=3'
+```
+
+`-c` 只允许 `default_model`、`search.enabled/backend/max_results/connect_timeout_secs/request_timeout_secs`，
+值按 TOML 解析；字符串要带 TOML 双引号，例如 `-c 'default_model="qwen-max"'`。
+它不接受 endpoint、实际 key 或日志路径覆盖。
+
+输入 `/mo` 后 Tab/Enter 只补全 `/model`；完整 `/model` 后 Enter 打开模型窗口，方向键
+移动、Enter 申请、Esc 关闭并保留草稿。也可直接提交 `/model qwen-max`。
+状态栏在 Core 确认后更新 profile ID；Running 时拒绝切换，缺 key 等失败保留原模型。
+等待确认期间不重复选择或提交普通 Prompt；Esc 后可继续编辑，异步成功不会清掉新草稿。
+若要退出窗口先 Esc，再提交 `/exit`。
+
+切换仅本会话、保留历史、不修改默认配置；后续历史可能发送给新 Provider。重启按配置
+和启动覆盖重新选择。确认成功只表示本地装配，不代表远端鉴权成功。该交互仍需专项
+回归和真实终端验收，当前旧菜单测试尚有失败项，不能认定整套功能验收完成。
 
 源码中的响应链路已改为 SSE 增量展示，不再等待完整回答后一次显示；它按服务端增量更新，
 不是本地逐字动画。CLI 默认注册的 `web_search` 调用秘塔独立网页搜索 API，不调用问答
-接口、不抓取来源全文；搜索结果回填给千问，再由模型继续回答。查询会发送给秘塔，Prompt、
-工具定义与工具结果会发送给模型，两个服务可能分别计费；不要在查询中放入敏感内容。
-`MockWebSearch` 仍保留，但不是默认注册的工具。Thinking、定时刷新、会话恢复、`/model`、
+接口、不抓取来源全文；搜索结果回填给当前选中的模型，再由模型继续回答。查询会发送给秘塔，Prompt、
+工具定义与工具结果会发送给当前选中模型，两个服务可能分别计费；不要在查询中放入敏感内容。
+`MockWebSearch` 仅在显式配置时注册，不是默认工具。Thinking、定时刷新、会话恢复、
 保留会话的 Turn 取消、MCP 和沙箱尚未实现。已实现代码的
 设计入口是 [`../design/session-runtime.md`](../design/session-runtime.md) 和
 [`../design/tui-interface.md`](../design/tui-interface.md)。
 
 文本流式的手动验收清单（待执行，不是通过记录）：
 
-1. 初始状态栏显示 `Idle`。
+1. 初始状态栏显示 `Idle` 和已确认模型的 profile ID。
 2. 提交非空 Prompt 后出现 `You`，随后状态变为 `Running`。
 3. `Assistant` 在请求完成前逐段出现，流式期间保持 `Running`，成功结束后回到 `Idle`。
 4. Provider 错误显示为 `Error`，保留已经显示的片段且 TUI 不退出；下一条 Prompt 可提交。
@@ -97,11 +180,13 @@ RUST_LOG=info,vortex_tools=debug cargo run -p vortex-cli --locked
 - 空结果、认证/限流错误、超时、非 JSON 和超大响应优先用本地 fixture 做回归，不为
   制造错误反复调用付费接口；搜索期间输入 `/exit` 应能中止等待并恢复终端。
 
-秘塔工具默认只接受 `query`，去除首尾空白后最多 512 个字符，返回最多 5 条结果。
-连接超时为 5 秒，单次请求与正文读取总超时为 20 秒，正文最多 256 KiB，最终结果 JSON
-最多 16 KiB；不自动重试或跟随重定向。这些限制属于具体工具，不是注册表的通用能力。
+秘塔工具只接受 `query`，去除首尾空白后最多 512 个字符；按配置返回最多 1～5 条，默认
+5 条，即使后端多返回也按配置截断。连接超时默认 5 秒（可配 1～30 秒），请求与正文
+读取总超时默认 20 秒（可配 1～120 秒），连接不得大于总超时。正文固定最多 256 KiB，
+结果 JSON 固定最多 16 KiB；不自动重试或跟随重定向。这不是注册表的通用治理能力。
 
-缺少 `METASO_API_KEY` 会在进入 TUI 前报错，不会自动退回 Mock。HTTP 401 应检查密钥，
+启用秘塔且缺少配置指定的 key（默认 `METASO_API_KEY`）会在进入 TUI 前报错，不会自动
+退回 Mock；关闭搜索或 Mock 不要求该 key。HTTP 401 应检查密钥，
 403 检查服务权限，429 检查限流或额度；连接失败检查网络、DNS 与 TLS。错误 ToolResult
 仍回填模型，由模型继续处理，不必然使整个 Turn 失败。产品尚无应用内代理配置，
 客户端保留 Reqwest 默认系统代理行为；成功联网不能据此证明大陆无代理直连。
@@ -109,16 +194,17 @@ RUST_LOG=info,vortex_tools=debug cargo run -p vortex-cli --locked
 详细接口见 [Agent loop](../design/agent-loop.md)。正常路径已跑通，无需反复验证同一个
 成功请求；建议保留一份不含认证信息的响应样例，后续补空结果与异常契约测试。
 
-现有 `exec` 分支未迁移到本次流式 Session/搜索链路，不要求秘塔 Key，也不使用本节
-清单验收。完整命令目标
+现有 exec 未迁移到流式 Session/配置/搜索链路，不要求秘塔 key，收到 `-m/-c` 明确返回
+非零错误；不传时仍走旧执行路径，也不使用本节清单验收。完整命令目标
 （exec 模式、`vortex resume`、审批与沙箱参数、输出契约、退出码）记录在
 [`../design/cli-surface.md`](../design/cli-surface.md)，不可把其中所有参数视为已经实现。
 
 ## 日志与本地配置
 
-所有模式启动时都初始化日志，以 JSON 行追加到 `$VORTEX_HOME/logs/vortex.log`，不向 TUI
+正常执行 TUI/exec 时共用 AppPaths 的日志目录，以 JSON 行追加到 `<vortex-home>/logs/vortex.log`，不向 TUI
 屏幕打印日志。新建日志文件在 Unix 上使用 0600 权限，已有文件权限不会因此自动收紧。
-目前没有自动轮转；日志不是会话 JSONL，不提供恢复功能。
+目前没有自动轮转；日志不是会话 JSONL，不提供恢复功能。`--help/--version` 在路径/日志
+初始化之前由 clap 处理。日志初始化只创建必要目录，不生成配置、sessions/state/cache。
 
 默认日志级别为 info，未传 `-v` 时使用 RUST_LOG；单个 `-v` 会强制 debug，覆盖该环境
 变量。当前 CLI 的 verbose 是 bool，不支持目标设计中的多次递增；没有 quiet 参数。
@@ -130,7 +216,8 @@ cargo run -p vortex-cli --locked -- -v
 
 已移除 `app.rs` 提交分支记录输入原文的 TRACE，但尚未完成全链路日志/错误脱敏验收。
 不要为排障默认记录正文；前面的脱敏验收项仍需按实际日志与错误路径检查。
-`-c/--config` 虽可解析，但目前未应用到运行配置，不能用它切换模型或日志路径。
+`-c/--config` 已用于 TUI 的模型/搜索配置白名单，但不调整 HOME 或日志路径；HOME 使用
+VORTEX_HOME 或默认用户目录，日志级别仍通过 RUST_LOG/`-v` 控制。
 
 ## 文档导航
 

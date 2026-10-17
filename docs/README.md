@@ -28,7 +28,7 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：设计安装、用户目录、日志位置或 Windows 路径适配时。
 
-- [`design/configuration.md`](design/configuration.md) —— 模型/搜索配置的产品契约：来源、优先级、受限项目字段、请求选项、配置来源诊断、硬限制与系统策略边界。
+- [`design/configuration.md`](design/configuration.md) —— 已接入 TUI 的模型/搜索配置契约：来源、优先级、受限项目字段、模型级请求选项、按需凭据和来源诊断；测试边界见根 README。
 
   **什么时候查**：实现 config、HOME/日志入口迁移、`-m/-c` 或 `/model` 时；正式契约优先于本地实施稿。
 
@@ -40,11 +40,11 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：实现或修改 CLI 时。参数命名与语义以此为准，不要在代码里临时决定。
 
-- [`design/credentials.md`](design/credentials.md) —— 密钥从哪里来、`.env` 的定位、Provider 配置形状、日志脱敏规则。
+- [`design/credentials.md`](design/credentials.md) —— 环境密钥按需读取、`.env` 的定位、Provider/模型分离、搜索关闭/Mock 的凭据边界及脱敏规则。
 
   **什么时候查**：接入新 Provider、处理 API 密钥、写任何会记录请求内容的日志时。
 
-- [`design/session-runtime.md`](design/session-runtime.md) —— 当前 Session actor、Provider 抽象、Turn 状态和事件顺序。
+- [`design/session-runtime.md`](design/session-runtime.md) —— Session actor、ModelManager/Factory、模型切换确认、每 Turn 固定 Provider、状态和事件顺序。
 
   **什么时候查**：阅读 `vortex-core`、排查 TUI 为何收到某个事件，或补充 Session/Provider 测试时。
 
@@ -60,9 +60,9 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：实现 Agent loop、上下文压缩、工具调用或 Provider 请求转换时。
 
-- [`design/tui-interface.md`](design/tui-interface.md) —— TUI 状态流、slash v1 的解析/补全菜单与 /exit、增量事件投影、终端生命周期及后续交互边界。
+- [`design/tui-interface.md`](design/tui-interface.md) —— TUI 状态流、`/exit`/`/model` 解析与窗口、pending/确认/草稿保护、增量事件和终端生命周期。
 
-  **什么时候查**：阅读 `vortex-tui`、核对 slash 的 Enter/Tab/Esc 行为、补充 reducer/widget 测试，或增加终端交互时。
+  **什么时候查**：阅读 `vortex-tui`、核对 Enter/Tab/Esc、模型切换确认和草稿保留，补充 reducer/widget 测试或增加交互时。
 
 - [`design/transcript-scrolling.md`](design/transcript-scrolling.md) —— Transcript 的滚动状态、自动跟随、按键映射、滚动条渲染和测试边界。
 

@@ -18,9 +18,11 @@ v1 串行执行：每个模型步骤最多一个 ToolCall，每个 Turn 最多�
 | `vortex-provider/src/openai_chat/` | 请求映射、SSE 工具增量组装；不执行工具 |
 | `vortex-tools/src/mock_web_search.rs` | 固定搜索结果，用于验证执行路径 |
 | `vortex-tools/src/metaso_web_search.rs` 及子模块 | 秘塔 HTTP 搜索、请求/响应映射与工具内边界限制 |
-| `vortex-cli/src/main.rs` | 具体 Provider/Tool 装配；TUI 不认识它们 |
+| `vortex-cli/src/main.rs`、`bootstrap.rs`、`model_factory.rs` | 解析参数，加载配置并按需装配具体 Provider/Tool；TUI 不认识它们 |
 
-Mock v1 是最初的闭环基线；当前 CLI 默认注册秘塔工具，复用同一执行契约，不接入 Tavily。
+Mock v1 是最初的闭环基线；当前 bootstrap 按配置关闭搜索或注册秘塔/Mock，默认秘塔，
+复用同一执行契约，不接入 Tavily。关闭搜索时传 ToolRegistry::empty()；整个 Session
+的工具目录固定，模型切换不重新装配工具。开启搜索时选择的模型须声明支持工具调用。
 仍不实现并行工具、审批、沙箱、通用 JSON Schema 校验、注册表统一超时或总 Token 预算。
 秘塔工具单独实现参数校验、请求超时与输出限制；不能把这些推断为所有 Tool 都已受治理。
 
@@ -66,16 +68,19 @@ Turn。工具只处理参数，不负责生成调用 ID；注册表不自动执�
 `MockWebSearch` 注册名为 `web_search`，Schema 要求字符串 `query`。实现手动检查该字段
 并去除首尾空白，拒绝空查询；没有校验 Schema 的所有规则（如额外字段）。成功输出包含
 `mock: true`、规范化后的查询和一条固定结果，URL 为 `https://example.invalid/result-1`。
-它不会因查询变化而检索网页，也不代表模型侧托管搜索。CLI 默认不注册 Mock，不能与
-同名的 `MetasoWebSearch` 同时加入注册表。
+它不会因查询变化而检索网页，也不代表模型侧托管搜索。显式 `search.backend="mock"`
+才注册 Mock，不读搜索 key，不能与同名 MetasoWebSearch 同时注册；数量/超时设置不使
+固定 Mock 变成真实检索或完整秘塔模拟。
 
 ### 秘塔搜索（默认实现）
 
 `MetasoWebSearch` 仍注册为 `web_search`，只接受对象中的字符串 `query`，拒绝额外字段、
 空查询和去除首尾空白后超过 512 个 Unicode 字符的查询。HTTP 留在 Tools，Core、Provider
-和 TUI 不认识厂商 DTO；CLI 从 `METASO_API_KEY` 读取独立凭据并装配工具。
+和 TUI 不认识厂商 DTO；CLI 从 `search.api_key_env` 指定的环境变量读取独立凭据，默认
+`METASO_API_KEY`，并把配置映射成工具选项。
 
-工具向固定 HTTPS 搜索地址发送 `q`，范围为 `webpage`，数量为字符串 `"5"`，关闭摘要
+工具向固定 HTTPS 搜索地址发送 `q`，范围为 `webpage`，size 为配置条数的字符串（默认
+`"5"`，允许 `"1"`～`"5"`），关闭摘要
 增强与来源全文抓取，不调用秘塔问答接口。认证头标记 sensitive，类型使用脱敏 Debug；
 日志只记录后端、状态码、耗时、字节数和脱敏错误，不记录查询或响应正文。
 
@@ -87,9 +92,11 @@ Turn。工具只处理参数，不负责生成调用 ID；注册表不自动执�
 
 具体工具的边界如下，不改变注册表公共接口：
 
-- 连接最多 5 秒，单次请求与正文读取总超时 20 秒；不自动重试或跟随重定向。
+- 连接超时默认 5 秒，配置允许 1～30 秒；请求与正文读取总超时默认 20 秒，允许 1～120
+  秒，连接超时不得大于总超时；不自动重试或跟随重定向。
 - HTTP 成功正文最多 256 KiB，逐 chunk 检查；成功响应须为 JSON 类型。
-- 最多返回 5 条，标题最多 160 字符、片段最多 800 字符、URL 最多 2,048 字节。
+- 按配置返回最多 1～5 条，硬上限 5；即使后端多返回也按配置裁剪并标记 truncated。
+  标题最多 160 字符、片段最多 800 字符、URL 最多 2,048 字节。
 - 最终序列化 JSON 最多 16 KiB；超预算移除末尾结果并标记截断，不切断 JSON 字符串。
 - HTTP、传输、协议及超时错误通过现有 ToolError 转成错误 ToolResult，并回填模型。
 - 请求直接 await，不另起后台任务；Shutdown 中止 `run_turn` 时丢弃等待中的 future，
@@ -104,8 +111,9 @@ Turn。工具只处理参数，不负责生成调用 ID；注册表不自动执�
 适配器；项目尚无 MCP client、传输、认证和生命周期治理。MCP 是工具接入协议，不自动
 提高搜索质量或降低费用；未来需要复用外部 MCP 工具时再独立设计，不改 Core 的工具契约。
 
-同名 web_search 每次只装配一个实现。缺少秘塔 Key 时在进入 TUI 前明确失败，不偷偷
-退回 Mock；旧 exec 不因此新增秘塔认证要求。CLI 不自动加载 .env，本地脚本负责导出。
+同名 web_search 每次只装配一个实现；disabled/Mock 不读秘塔 Key，启用秘塔却缺 key 时
+在进入 TUI 前明确失败，不退回 Mock。旧 exec 不新增搜索认证要求，并拒绝 TUI 专用
+`-m/-c`。CLI 不自动加载 .env，本地脚本负责导出。
 模型不看到凭据或厂商端点，也不能通过工具参数指定任意 endpoint。
 
 响应映射补充规则：title 缺失/空白回退 URL，snippet 缺失/null 为空；规范化后的 URL
@@ -113,13 +121,14 @@ Turn。工具只处理参数，不负责生成调用 ID；注册表不自动执�
 无效则失败。文字裁剪按字符，最终输出预算按序列化 UTF-8 字节计算。控制字符过滤只在
 搜索映射局部生效，不代表最终模型文本或整条 TUI 链路已有完整防护。
 
-256 KiB 是正文消费上限，不承诺 HTTP/TLS 缓冲完全不占额外内存。20 秒异步 timeout
+256 KiB 是正文消费上限，不承诺 HTTP/TLS 缓冲完全不占额外内存。可配置的异步 timeout（默认 20 秒）
 包围请求和正文读取，但不能抢占同步 JSON 解析；映射仍依赖小体积预算控制工作量。
 四次工具轮数、单请求超时、响应大小与输出大小是不同限制，不能相互替代。
 
 只有第二个真实搜索后端出现且确有重复时，再提取 WebSearchBackend 和共用结果类型；
-通用网络预算在多个工具有共同需求时下沉。TOML 配置未来承载非密钥选项，密钥仍保持
-独立来源。搜索、抓取网页与问答是不同能力，不因返回 URL 就增加来源抓取或 SSRF 风险。
+通用网络预算在多个工具有共同需求时下沉。TOML 已承载搜索开关、后端、结果数量和超时，
+密钥值仍来自环境。工具构造入口独立校验数量/超时，256 KiB/16 KiB 等硬限制不开放配置。
+搜索、抓取网页与问答是不同能力，不因返回 URL 就增加来源抓取或 SSRF 风险。
 若以后引入抓取，须另设路径/网络/重定向和输出边界。
 
 ## 多步执行与历史
@@ -183,6 +192,8 @@ TUI 在 ToolCallStarted/ToolCallFinished 时只更新 notice 并重绘，Session
 - SSE arguments 跨包拼接、后续空 ID、真实非空 ID 变化、非法 JSON 和缺少 DONE。
 - Session 保留已完成工具步骤，失败部分回复不入历史；退出和 UI 背压不阻塞取消。
 - TUI 工具事件不新增 Transcript entry、不改变 Running 状态，完成/失败后清除 notice。
+- 搜索 disabled/Mock 不读取 key；秘塔请求 size 保持 JSON 字符串，后端多返回也遵守配置
+  条数；非法选项被构造器拒绝，配置无法放宽响应/输出硬预算。
 
 测试使用受控 fake 和本地 fixture，不访问付费 API。秘塔已通过替换 CLI 注册的 Tool
 接入；后续服务适配仍应在 Tools 内转换请求/结果，不在 Agent loop 中加入厂商字段。

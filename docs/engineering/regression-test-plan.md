@@ -1,6 +1,7 @@
 # 流式会话与搜索工具回归测试方案
 
 - 整理日期：2026-10-06。
+- 配置/模型管理接口同步：2026-10-17；新增场景仍是待补要求，不代表执行过测试阶段。
 - 定位：从本地实施稿回收的测试方法与待补场景，不是测试通过记录。
 - 契约依据：[Session](../design/session-runtime.md)、[Agent loop](../design/agent-loop.md)、
   [SSE](../design/streaming-response.md)。实际覆盖与运行结果见根 [README](../../README.md)。
@@ -19,15 +20,19 @@
 | 本地 HTTP server | HTTP、SSE 分帧与请求 DTO | 只监听 loopback 临时端口，使用固定假 Key，记录请求并返回 fixture |
 
 FakeProvider 的 `requests()` 返回捕获请求的克隆快照；流本身不可 Clone，应通过队列
-移出。Mutex 只保护短暂的队列/记录访问，不持锁跨 `.await`。当前入口使用：
+移出。Mutex 只保护短暂的队列/记录访问，不持锁跨 `.await`。当前 Session 接收 ModelManager；
+`session.rs` 的模块内旧测试使用本地 `SingleModelFactory`/`test_models` 包装 FakeProvider：
 
 ```rust
-let connection = start_session(provider, ToolRegistry::empty());
+let models = test_models(fake_provider.clone());
+let connection = start_session(models, ToolRegistry::empty());
 let requests = fake_provider.requests();
 // 核对 requests[n].items 和 requests[n].tools，而非旧的 messages 字段。
 ```
 
-这是测试组织示例，`requests()` 属于自定义 FakeProvider，不是生产 ModelProvider 方法。
+这是 tests 模块内的组织示例，`test_models` 是该模块的私有 helper，不是 Core 公开 API；
+其他位置需自建实现 ModelFactory 的假工厂。`requests()` 同样属于自定义 FakeProvider，
+不是生产 ModelProvider 方法。
 工具场景传入真实 ToolRegistry 和 FakeTool；不要通过真实模型保证某次一定调用工具。
 MockWebSearch 只替代搜索服务，仍搭配真实模型时不属于完全离线测试。
 
@@ -62,9 +67,16 @@ MockWebSearch 只替代搜索服务，仍搭配真实模型时不属于完全离
 | 空白、历史重复、跨步骤重复 ID | 不执行工具，不产生重复 ID 的结果；工具失败也不释放 ID |
 | 后续模型步骤失败 | 已完成工具步骤仍在历史，失败步骤的部分正文不在历史 |
 | 不合法事件组合 | Stop 带调用、ToolCalls 不带调用、多调用、终态后继续发事件均失败 |
+| 空闲切换后第二轮 | 新 Provider 收到保留且不重复的历史，旧 Provider 不收到第二轮，不产生 slash User 消息 |
+| Running/构造失败/同 ID 选择 | 专用拒绝/确认事件，失败保留绑定；同 ID 不重建但仍确认 |
 
 ToolRegistry 单独验证稳定的 specs 注册顺序、重名拒绝和 empty 注册表行为。
 工具闭环测试还应核对 ToolStarted/ToolFinished 与文本事件的顺序，不只检查返回文本。
+
+配置/装配专项另用 TempDir 和注入 KeyReader：合并优先级、cwd-only、路径/来源状态、
+未知字段和坏文件、最终能力校验时机、未选中模型不读 key、disabled/Mock 不读搜索 key。
+同 Provider 两个模型的 Plain/Qwen 预设不串用；切换后用户配置字节不变，重启恢复加载默认值。
+这些是待补矩阵，不因旧 Session 七项通过而视为已验证；实际安排与结果见根 README。
 
 ## 4. Provider：请求映射、Decoder 与真实分帧
 
@@ -90,18 +102,19 @@ fixture 必须使用正确的 SSE 空行边界；多行 data 合并后仍须为�
 | 分组 | 用例与断言 |
 | --- | --- |
 | 查询 | trim、中文按字符计数、512 边界；非对象、缺字段、非字符串、空查询和额外字段失败且不回显输入 |
-| 请求 DTO | q、webpage、字符串 size=5 和三个关闭选项完全匹配 |
+| 请求 DTO | q、webpage、按配置序列化的字符串 size（如 "2"，默认 "5"）与三个关闭选项匹配 |
 | 结果顺序 | URL 规范化后去重保留首条，不透传未知厂商字段 |
 | 空结果 | 空数组成功；缺数组、null、错误 JSON 不转换为空结果成功 |
 | 可选文本 | title 缺失/空白时回退 URL，snippet 缺失/null 时为空，不编造来源正文 |
 | URL | 拒绝非 HTTP(S)、无 host、内嵌凭据、控制字符、超长和非法 URL；部分丢弃标记 truncated，全部不可用失败 |
-| 预算 | 最多 5 条、标题 160 字符、片段 800 字符、URL 2,048 字节；中文与 JSON 转义后仍在 16 KiB 内且可重新解析 |
+| 预算 | 条数按配置 1..5；后端多返回仍截断；标题 160 字符、片段 800 字符、URL 2,048 字节；中文/JSON 转义后仍在 16 KiB 内 |
 | 控制字符 | 片段中不含 ESC；这是搜索映射局部防护，不代表模型输出全链路已过滤 |
 
 ### HTTP、安全与取消
 
-父模块的私有 `from_parts` 可注入本地端点、较短超时和较小预算，不增加公开 endpoint
-配置接口。测试 Client 使用 `no_proxy()`，防止本地 fixture 被环境代理接管；这不改变
+父模块的私有 `from_parts(client, api_key, endpoint, limits, max_results)` 可注入本地端点、
+较短超时和较小预算；旧用例最后一个实参传 5，条数用例传 2，不增加公开 endpoint
+配置接口。公开 new_with_options 另测生产数量/超时边界。测试 Client 使用 `no_proxy()`，防止本地 fixture 被环境代理接管；这不改变
 生产 Client 的代理行为。服务端任务持有 JoinHandle，在 Drop 时 abort，避免失败用例挂住。
 
 需覆盖以下场景：
@@ -125,6 +138,10 @@ DTO。2026-10-02 临时实施稿记录过独立临时 crate 的 19 个示例测�
 阶段 A 验证增量追加、完成清理、失败片段保留、CommandRejected 不误删活跃 Assistant；
 工具事件仅更新 notice，不新增 Transcript entry、不提前将 Running 改为 Idle。
 TestBackend 覆盖 Markdown 围栏跨 Delta、布局、Unicode 测高及手动滚动不跳回尾部。
+
+模型窗口补 Snapshot 初始化、确认前不换标签、成功/拒绝、pending 防重复、Esc 后新草稿
+不被清空及 `/exit`。根菜单现在有 exit/model：裸 `/` 按两项断言，单项循环用 `/ex`，布局
+测试从实际菜单矩形计算内容行，不保留旧固定行号。现有失败与缺口记录在根 README。
 
 阶段 B 实施后再添加思考/正文分离、晚到思考不回退回答状态、只有思考时失败保留、
 最终帧刷新与节流测试。阶段 C 再测试第二轮独立思考回传、User/System 无思考字段、

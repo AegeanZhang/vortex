@@ -68,7 +68,14 @@ fn result_url(link: &str) -> Option<String> {
     (url.len() <= MAX_URL_BYTES).then_some(url)
 }
 
-pub(super) fn normalize_response(body: &[u8], query: &str) -> Result<String, ToolError> {
+pub(super) fn normalize_response(
+    body: &[u8],
+    query: &str,
+    max_results: usize,
+) -> Result<String, ToolError> {
+    if !(1..=MAX_RESULTS).contains(&max_results) {
+        return Err(ToolError::Execution("秘塔搜索数量必须在 1..=5".into()));
+    }
     let response: MetasoResponse = serde_json::from_slice(body).map_err(|_| protocal_error())?;
     let had_pages = !response.webpages.is_empty();
     let mut seen = HashSet::new();
@@ -80,7 +87,8 @@ pub(super) fn normalize_response(body: &[u8], query: &str) -> Result<String, Too
     };
 
     for page in response.webpages {
-        if output.results.len() == MAX_RESULTS {
+        //if output.results.len() == MAX_RESULTS {
+        if output.results.len() >= max_results {
             output.truncated = true;
             break;
         }

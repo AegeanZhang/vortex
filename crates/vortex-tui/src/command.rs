@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SlashCommand {
     Exit,
+    Model,
 }
 
 #[derive(Debug)]
@@ -10,18 +11,31 @@ pub(crate) struct CommandSpec {
     pub(crate) description: &'static str,
 }
 
-pub(crate) static COMMANDS: [CommandSpec; 1] = [CommandSpec {
-    command: SlashCommand::Exit,
-    name: "exit",
-    description: "退出 Vortex (终止当前对话)",
-}];
+pub(crate) static COMMANDS: [CommandSpec; 2] = [
+    CommandSpec {
+        command: SlashCommand::Exit,
+        name: "exit",
+        description: "退出 Vortex (终止当前对话)",
+    },
+    CommandSpec {
+        command: SlashCommand::Model,
+        name: "model",
+        description: "选择本会话使用的模型",
+    },
+];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ParsedCommand {
+    Exit,
+    Model { model_id: Option<String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CommandParse {
     Incomplete,
     Invalid(&'static str),
     NotCommand,
-    Ready(SlashCommand),
+    Ready(ParsedCommand),
 }
 
 pub(crate) fn completion_prefix(text: &str) -> Option<&str> {
@@ -36,7 +50,8 @@ pub(crate) fn completion_prefix(text: &str) -> Option<&str> {
 }
 
 pub(crate) fn parse_command(text: &str) -> CommandParse {
-    // strip_prefix，If the string does not start with prefix, returns None.
+    use vortex_core::config::valid_profile_id;
+
     let Some(body) = text.strip_prefix('/') else {
         return CommandParse::NotCommand;
     };
@@ -44,6 +59,7 @@ pub(crate) fn parse_command(text: &str) -> CommandParse {
     if body.chars().any(|ch| matches!(ch, '\r' | '\n')) {
         return CommandParse::Invalid("slash 命令必须是单行文本");
     }
+
     if body.is_empty() {
         return CommandParse::Incomplete;
     }
@@ -53,20 +69,35 @@ pub(crate) fn parse_command(text: &str) -> CommandParse {
         return CommandParse::Invalid("/ 后必须紧接命令名");
     }
 
-    if let Some(spec) = COMMANDS.iter().find(|spec| spec.name == name) {
-        // name 是从body 拆出的前缀， name.len() 必须位于 UTF-8 字符边界.
-        let suffix = &body[name.len()..];
-        if !suffix.trim_matches([' ', '\t']).is_empty() {
-            return CommandParse::Invalid("/exit 不接受参数");
+    let args = body[name.len()..].trim_matches([' ', '\t']);
+
+    let command = COMMANDS
+        .iter()
+        .find(|spec| spec.name == name)
+        .map(|spec| spec.command);
+
+    match command {
+        Some(SlashCommand::Exit) if args.is_empty() => CommandParse::Ready(ParsedCommand::Exit),
+        Some(SlashCommand::Exit) => CommandParse::Invalid("/exit 不接受参数"),
+
+        Some(SlashCommand::Model) if args.is_empty() => {
+            CommandParse::Ready(ParsedCommand::Model { model_id: None })
         }
-        return CommandParse::Ready(spec.command);
-    }
+        Some(SlashCommand::Model) if valid_profile_id(args) => {
+            CommandParse::Ready(ParsedCommand::Model {
+                model_id: Some(args.into()),
+            })
+        }
+        Some(SlashCommand::Model) => {
+            CommandParse::Invalid("/model 只接受一个合法的模型 profile ID")
+        }
 
-    if body == name && COMMANDS.iter().any(|spec| spec.name.starts_with(name)) {
-        return CommandParse::Incomplete;
-    }
+        None if body == name && COMMANDS.iter().any(|spec| spec.name.starts_with(name)) => {
+            CommandParse::Incomplete
+        }
 
-    CommandParse::Invalid("未知 slash 命令; 输入 / 查看可用命令")
+        None => CommandParse::Invalid("未知 slash 命令；输入 / 查看可用命令"),
+    }
 }
 
 #[cfg(test)]
@@ -78,7 +109,7 @@ mod tests {
         for text in ["/exit", "/exit ", "/exit\t", "/exit \t"] {
             assert_eq!(
                 parse_command(text),
-                CommandParse::Ready(SlashCommand::Exit),
+                CommandParse::Ready(ParsedCommand::Exit),
                 "{text:?}"
             );
         }

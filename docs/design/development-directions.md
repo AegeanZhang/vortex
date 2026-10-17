@@ -7,7 +7,7 @@
 
 | 方向 | 依赖与边界 | 设计入口 |
 | --- | --- | --- |
-| 输入与退出 | slash v1 仅 exit；后续补 Paste 只编辑、动态多行、提交确认/草稿恢复和更多真实命令 | [TUI 接口](tui-interface.md#slash-命令与菜单)、[输入调研](../research/tui-layout-and-input-research.md) |
+| 输入与退出 | exit/model 已接入；后续补 Paste 只编辑、动态多行、普通 Prompt 提交确认/草稿恢复和更多命令 | [TUI 接口](tui-interface.md#slash-命令与菜单)、[输入调研](../research/tui-layout-and-input-research.md) |
 | Transcript 稳定性 | 鼠标/键盘同一滚动模型；resize、Unicode、极小窗口与终端恢复测试 | [滚动设计](transcript-scrolling.md) |
 | 终端画面恢复 | Resize 已接入普通重绘；Kitty 合盖后画面丢失待定位，强制重绘仍是候选 | [画面恢复](terminal-redraw-recovery.md) |
 | 流式输出与 Thinking | 增量流、终态顺序、失败历史策略，再做折叠与缓存 | [流式响应](streaming-response.md) |
@@ -19,9 +19,9 @@
 
 ## 从聊天走向 Agent
 
-1. 配置与模型选择：用户/项目级 TOML、Provider profile、模型能力与环境变量名；配置
-   先放 Core，复杂度确有需要时再拆 crate。`/model` 以 Core 确认结果为准，运行中拒绝
-   还是延后切换要先定契约，不能仅更换 TUI 标签。
+1. 配置与模型选择的验证和演进：分层 TOML、Provider/模型 profile、`-m/-c`、`/model`
+   首版已接入，配置保留在 Core。当前切换仅本会话，以 Core 确认为准，运行中明确拒绝，
+   不延后执行或自动写盘；先补专项回归和人工验收，再讨论目录过滤、显式保存或新协议。
 2. 文本 ContextAssembler：分离指令与会话，加载分层项目指令，确定顺序与预算接口。
    参见 [消息构建](message-building.md)。请求日志只记录必要元数据，正文诊断另行授权。
 3. 从秘塔搜索继续扩展：具体工具已有参数、超时和输出限制，下一步补注册表层的通用

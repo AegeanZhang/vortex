@@ -118,7 +118,19 @@ mod tests {
         assert!(!menu.is_open());
         assert!(menu.selected_command().is_none());
 
-        for text in ["/", "/e", "/ex", "/exit"] {
+        menu.sync("/");
+        assert!(menu.is_open());
+        assert_eq!(
+            menu.candidates
+                .iter()
+                .map(|spec| spec.name)
+                .collect::<Vec<_>>(),
+            vec!["exit", "model"]
+        );
+        assert_eq!(menu.selected_command().unwrap().name, "exit");
+        assert_eq!(menu.desired_height(), 4);
+
+        for text in ["/e", "/ex", "/exit"] {
             menu.sync(text);
             assert!(menu.is_open());
             assert_eq!(menu.candidates.len(), 1);
@@ -127,6 +139,17 @@ mod tests {
                 crate::command::SlashCommand::Exit
             );
             assert_eq!(menu.selected_command().unwrap().name, "exit");
+        }
+
+        for text in ["/m", "/mo", "/model"] {
+            menu.sync(text);
+            assert!(menu.is_open());
+            assert_eq!(menu.candidates.len(), 1);
+            assert_eq!(
+                menu.selected_command().unwrap().command,
+                crate::command::SlashCommand::Model
+            );
+            assert_eq!(menu.selected_command().unwrap().name, "model");
         }
 
         menu.dismiss();
@@ -145,14 +168,37 @@ mod tests {
     #[test]
     fn navigation_wraps_a_single_candidate_without_changing_it() {
         let mut menu = CommandMenu::default();
-        menu.sync("/");
+        menu.sync("/ex");
         for _ in 0..3 {
             menu.previous();
+            assert_eq!(menu.selected, 0);
+            assert_eq!(menu.selected_command().unwrap().name, "exit");
             menu.next();
             assert_eq!(menu.selected, 0);
             assert_eq!(menu.selected_command().unwrap().name, "exit");
         }
         assert_eq!(menu.desired_height(), 3);
+    }
+
+    #[test]
+    fn navigation_wraps_between_exit_and_model() {
+        let mut menu = CommandMenu::default();
+        menu.sync("/");
+        assert_eq!(menu.selected_command().unwrap().name, "exit");
+
+        menu.previous();
+        assert_eq!(menu.selected_command().unwrap().name, "model");
+        menu.previous();
+        assert_eq!(menu.selected_command().unwrap().name, "exit");
+        menu.next();
+        assert_eq!(menu.selected_command().unwrap().name, "model");
+        menu.next();
+        assert_eq!(menu.selected_command().unwrap().name, "exit");
+
+        menu.next();
+        menu.sync("/ex");
+        assert_eq!(menu.selected, 0);
+        assert_eq!(menu.selected_command().unwrap().name, "exit");
     }
 
     #[test]

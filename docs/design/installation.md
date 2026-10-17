@@ -1,6 +1,6 @@
 # 安装与运行目录设计
 
-本文定义 Vortex 的安装边界、用户 HOME 和跨平台运行目录，供实现与发布时遵循；配置内容与加载规则见 [配置设计](configuration.md)。它是产品目标，不代表安装器、Windows 支持或默认 HOME 已经实现。当前可运行方式仍以 [上手指南](../guide/getting-started.md) 和根 README 为准。
+本文定义 Vortex 的安装边界、用户 HOME 和跨平台运行目录；配置内容与加载规则见 [配置设计](configuration.md)。CLI 已通过 AppPaths 统一解析默认 HOME、cwd、配置和日志路径；安装器、自更新及跨平台验收仍是后续工作。接口已接入不代表路径/权限专项测试完成，当前验证边界见根 README，运行入口见 [上手指南](../guide/getting-started.md)。
 
 ## 1. 安装入口、程序包与用户 HOME
 
@@ -37,7 +37,7 @@ Windows 原生与 WSL 默认分离，不自动共用认证、会话或运行状�
 
 路径解析不要求目录已存在，不先对尚不存在的 HOME 做 canonicalize。`~`、`$HOME`、`%USERPROFILE%` 在环境变量值内不由 Vortex 再次展开；需要 shell 先生成实际绝对路径。
 
-本地隔离开发数据的目标用法：
+本地隔离开发数据的覆盖示例（PowerShell 示例仍需 Windows 原生验收）：
 
 ```bash
 export VORTEX_HOME="${HOME}/.vortex-dev"

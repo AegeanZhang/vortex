@@ -1,6 +1,6 @@
 # 配置模块产品设计
 
-本文定义模型与搜索配置首版的用户行为和安全边界，是实施稿的依据；运行目录见 [安装设计](installation.md)，密钥处理见 [凭据设计](credentials.md)。本文是目标设计，当前源码尚未接入 TOML 加载、默认用户 HOME 或 `/model`；真实进展以根 README 为准。
+本文定义已接入的模型与搜索配置首版契约，是实施稿的依据；运行目录见 [安装设计](installation.md)，密钥处理见 [凭据设计](credentials.md)。CLI/Core/TUI 已接通 TOML、默认用户 HOME、`-m/-c` 与 `/model`；专项测试和真实交互验收尚未完成，验证结果以根 README 为准。下文验收要求不是通过记录。
 
 ## 1. 目标与职责
 
@@ -133,7 +133,7 @@ search.connect_timeout_secs
 search.request_timeout_secs
 ```
 
-例如 `-c 'default_model="qwen-max"'`、`-c 'search.enabled=false'`；字符串需 TOML 引号。命令参数规则见 [CLI 设计](cli-surface.md)，本节并不宣称已有可用实现。
+例如 `-c 'default_model="qwen-max"'`、`-c 'search.enabled=false'`；字符串需 TOML 引号。当前 CLI 仅在 TUI 分支将这些参数交给加载器；exec 收到任意 `-m/-c` 返回非零错误，不静默忽略。完整目标参数见 [CLI 设计](cli-surface.md)。
 
 `/model` 的首版契约：
 
@@ -166,7 +166,7 @@ Vortex HOME: /home/ming/.vortex
 
 1. 解析已有 CLI 参数，`--help/--version` 不需要创建 HOME 或读取配置。
 2. CLI 解析 HOME、cwd 和固定配置路径；初始化日志。
-3. 逐文件读取并严格检查 UTF-8、TOML、字段和体积。缺失可跳过，损坏/不可读必须报错，不回退另一个位置。
+3. 通过 `spawn_blocking` 在阻塞池中逐文件读取并检查 UTF-8、TOML、字段和体积。缺失可跳过，损坏/不可读必须报错，不回退另一个位置。
 4. 合并用户层并校验定义、引用、数值边界；校验受限项目覆盖，再应用 CLI 覆盖。
 5. 完整合并后才校验最终默认模型是否存在、是否与工具能力兼容。不得在 `-m/-c` 应用前因为未选中的默认模型不匹配而提前失败。
 6. 记录配置来源，按最终配置装配工具和选中模型，读取必要密钥；所有失败发生在进入 TUI 前。

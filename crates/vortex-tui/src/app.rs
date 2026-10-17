@@ -1,10 +1,16 @@
 use crate::{
     action::{Effect, ScrollCommand, UiAction},
-    command::{CommandParse, SlashCommand, parse_command},
-    widgets::{CommandMenu, MenuKey, PromptEditor, PromptInput, Transcript},
+    command::{CommandParse, ParsedCommand, parse_command},
+    widgets::{CommandMenu, MenuKey, ModelPicker, PromptEditor, PromptInput, Transcript},
 };
 
-use vortex_core::{AgentCommand, CoreEvent, SessionSnapshot, SessionStatus};
+use vortex_core::{AgentCommand, CoreEvent, ModelInfo, SessionSnapshot, SessionStatus};
+
+#[derive(Debug)]
+struct PendingModel {
+    model_id: String,
+    command_draft: String,
+}
 
 #[derive(Debug)]
 pub(crate) struct AppState {
@@ -13,6 +19,10 @@ pub(crate) struct AppState {
     prompt_editor: PromptEditor,
     transcript: Transcript,
     command_menu: CommandMenu,
+    selected_model: Option<ModelInfo>,
+    available_models: Vec<ModelInfo>,
+    model_picker: ModelPicker,
+    pending_model: Option<PendingModel>,
 }
 
 impl Default for AppState {
@@ -23,6 +33,10 @@ impl Default for AppState {
             prompt_editor: PromptEditor::default(),
             transcript: Transcript::default(),
             command_menu: CommandMenu::default(),
+            selected_model: None,
+            available_models: Vec::new(),
+            model_picker: ModelPicker::default(),
+            pending_model: None,
         }
     }
 }
@@ -35,6 +49,10 @@ impl From<SessionSnapshot> for AppState {
             prompt_editor: PromptEditor::default(),
             transcript: Transcript::from_messages(snapshot.messages),
             command_menu: CommandMenu::default(),
+            selected_model: Some(snapshot.model),
+            available_models: snapshot.models,
+            model_picker: ModelPicker::default(),
+            pending_model: None,
         }
     }
 }
@@ -46,11 +64,24 @@ impl AppState {
             SessionStatus::Running => "Status: Running",
             SessionStatus::Failed => "Status: Failed",
         };
-
+        /*
         match &self.notice {
             Some(notice) => format!("{status} | {notice}"),
             None => status.to_string(),
         }
+        */
+
+        let mut line = status.to_string();
+
+        if let Some(model) = &self.selected_model {
+            line.push_str(&format!(" | Model: {}", model.id));
+        }
+
+        if let Some(notice) = &self.notice {
+            line.push_str(&format!(" | {notice}"));
+        }
+
+        line
     }
 
     pub(crate) fn prompt_editor(&self) -> &PromptEditor {
@@ -63,6 +94,10 @@ impl AppState {
 
     pub(crate) fn command_menu(&self) -> &CommandMenu {
         &self.command_menu
+    }
+
+    pub(crate) fn model_picker(&self) -> &ModelPicker {
+        &self.model_picker
     }
 }
 
@@ -81,6 +116,16 @@ fn complete_selected_command(state: &mut AppState) -> Vec<Effect> {
 }
 
 fn edit_prompt(state: &mut AppState, input: PromptInput) -> Vec<Effect> {
+    if state.model_picker.is_open() {
+        match input.menu_key() {
+            Some(MenuKey::Escape) => state.model_picker.close(),
+            Some(MenuKey::Up) if state.pending_model.is_none() => state.model_picker.previous(),
+            Some(MenuKey::Down) if state.pending_model.is_none() => state.model_picker.next(),
+            _ => {}
+        }
+        return vec![Effect::Redraw];
+    }
+
     if state.command_menu.is_open() {
         match input.menu_key() {
             Some(MenuKey::Up) => {
@@ -110,13 +155,73 @@ fn edit_prompt(state: &mut AppState, input: PromptInput) -> Vec<Effect> {
     vec![Effect::Redraw]
 }
 
+fn open_model_picker(state: &mut AppState) -> Vec<Effect> {
+    if state.pending_model.is_some() {
+        state.notice = Some("正在等待模型切换确认".into());
+        return vec![Effect::Redraw];
+    }
+    state.command_menu.dismiss();
+    state
+        .model_picker
+        .open(&state.available_models, state.selected_model.as_ref());
+    state.notice = None;
+    vec![Effect::Redraw]
+}
+
+fn request_model_selection(state: &mut AppState, model_id: String) -> Vec<Effect> {
+    if state.pending_model.is_some() {
+        state.notice = Some("正在等待模型切换确认".into());
+        return vec![Effect::Redraw];
+    }
+    if state.status == SessionStatus::Running {
+        state.notice = Some("当前 Turn 正在运行，完成后再切换模型".into());
+        return vec![Effect::Redraw];
+    }
+    if let Some(reason) = state
+        .available_models
+        .iter()
+        .find(|model| model.id == model_id)
+        .and_then(|model| model.unavailable_reason.as_ref())
+    {
+        state.notice = Some(reason.clone());
+        return vec![Effect::Redraw];
+    }
+    state.pending_model = Some(PendingModel {
+        model_id: model_id.clone(),
+        command_draft: state.prompt_editor.text(),
+    });
+    state.notice = Some("正在等待模型切换确认".into());
+    vec![
+        Effect::SendCommand(AgentCommand::SelectModel { model_id }),
+        Effect::Redraw,
+    ]
+}
+
 fn submit_prompt(state: &mut AppState) -> Vec<Effect> {
+    if state.model_picker.is_open() {
+        if let Some(model_id) = state
+            .model_picker
+            .selected_model()
+            .map(|model| model.id.clone())
+        {
+            return request_model_selection(state, model_id);
+        }
+        state.notice = Some("没有可选择的模型".into());
+        return vec![Effect::Redraw];
+    }
+
     // 先读后判，不以 take_text 为解析或状态检查的前提
     let text = state.prompt_editor.text();
     match parse_command(&text) {
-        CommandParse::Ready(SlashCommand::Exit) => {
+        CommandParse::Ready(ParsedCommand::Exit) => {
             // 同步路由到现有语义 Action; Quit 最终分支，不会回到提交形成递归.
             return update(state, UiAction::Quit);
+        }
+        CommandParse::Ready(ParsedCommand::Model { model_id: None }) => {
+            return open_model_picker(state);
+        }
+        CommandParse::Ready(ParsedCommand::Model { model_id: Some(id) }) => {
+            return request_model_selection(state, id);
         }
         CommandParse::Incomplete => {
             if !state.command_menu.is_open() {
@@ -136,6 +241,11 @@ fn submit_prompt(state: &mut AppState) -> Vec<Effect> {
     }
     if state.status == SessionStatus::Running {
         state.notice = Some("a turn is already running".to_string());
+        return vec![Effect::Redraw];
+    }
+
+    if state.pending_model.is_some() {
+        state.notice = Some("模型切换尚未确认，请稍后提交".into());
         return vec![Effect::Redraw];
     }
 
@@ -194,6 +304,37 @@ pub(crate) fn update(state: &mut AppState, action: UiAction) -> Vec<Effect> {
             } else {
                 format!("Tool completed: {name}; waiting for model")
             });
+            vec![Effect::Redraw]
+        }
+        UiAction::CoreEvent(CoreEvent::ModelSelected { model }) => {
+            let matches_pending = state
+                .pending_model
+                .as_ref()
+                .is_some_and(|pending| pending.model_id == model.id);
+            state.selected_model = Some(model.clone());
+            if matches_pending {
+                if let Some(pending) = state.pending_model.take() {
+                    // 用户可能已经 Esc 并编辑；确认不能抹掉之后输入的新草稿。
+                    if state.prompt_editor.text() == pending.command_draft {
+                        state.prompt_editor.replace_text("");
+                        state.command_menu.sync("");
+                    }
+                }
+                state.model_picker.close();
+                state.notice = Some(format!("已切换模型：{}（仅本会话）", model.id));
+            }
+            vec![Effect::Redraw]
+        }
+        UiAction::CoreEvent(CoreEvent::ModelSelectionRejected { model_id, message }) => {
+            if state
+                .pending_model
+                .as_ref()
+                .is_some_and(|pending| pending.model_id == model_id)
+            {
+                state.pending_model = None;
+                state.notice = Some(message);
+            }
+            // 保留当前模型、原草稿和仍打开的窗口，允许重新选择。
             vec![Effect::Redraw]
         }
         UiAction::ScrollTranscript(command) => {

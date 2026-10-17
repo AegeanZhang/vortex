@@ -37,18 +37,18 @@ pub(super) fn parse_query(arguments: Value) -> Result<String, ToolError> {
 pub(super) struct MetasoSearchRequest<'a> {
     q: &'a str,
     scope: &'static str,
-    size: &'static str,
+    size: String,
     include_summary: bool,
     include_raw_content: bool,
     concise_snippet: bool,
 }
 
 impl<'a> MetasoSearchRequest<'a> {
-    pub(super) fn new(query: &'a str) -> Self {
+    pub(super) fn new(query: &'a str, max_results: usize) -> Self {
         Self {
             q: query,
             scope: "webpage",
-            size: "5",
+            size: max_results.to_string(),
             include_summary: false,
             include_raw_content: false,
             concise_snippet: false,

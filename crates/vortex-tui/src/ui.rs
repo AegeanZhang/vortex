@@ -35,6 +35,20 @@ fn command_menu_area(main_area: Rect, prompt_area: Rect, desired_height: u16) ->
     ))
 }
 
+fn model_picker_area(area: Rect) -> Option<Rect> {
+    let width = area.width.saturating_sub(2).min(80);
+    let height = area.height.saturating_sub(2).min(18);
+    if width < 4 || height < 4 {
+        return None;
+    }
+    Some(Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    ))
+}
+
 pub(crate) fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     let [header_area, main_area, status_area, prompt_area] = sections(frame.area());
 
@@ -59,6 +73,12 @@ pub(crate) fn render(frame: &mut Frame<'_>, state: &mut AppState) {
 
     // 输入框最后绘制，保证编辑器拥有最终的光标呈现。
     state.prompt_editor().render(frame, prompt_area);
+
+    if state.model_picker().is_open()
+        && let Some(area) = model_picker_area(frame.area())
+    {
+        state.model_picker().render(frame, area);
+    }
 }
 
 #[cfg(test)]
@@ -157,8 +177,20 @@ mod tests {
         edit_key(&mut state, KeyCode::Char('/'));
         terminal.draw(|frame| render(frame, &mut state)).unwrap();
         let buffer = terminal.backend().buffer();
-        let row: String = (0..80).map(|x| buffer[(x, 18)].symbol()).collect();
-        assert!(row.contains("/exit"));
+        let [_, main_area, _, prompt_area] = sections(buffer.area);
+        let menu_area = command_menu_area(
+            main_area,
+            prompt_area,
+            state.command_menu().desired_height(),
+        )
+        .unwrap();
+        assert_eq!(menu_area.height, 4);
+        for (offset, command) in [(1, "/exit"), (2, "/model")] {
+            let row: String = (menu_area.x..menu_area.right())
+                .map(|x| buffer[(x, menu_area.y + offset)].symbol())
+                .collect();
+            assert!(row.contains(command), "expected {command} in {row:?}");
+        }
         assert_eq!(buffer[(0, 21)].symbol(), "┌");
 
         edit_key(&mut state, KeyCode::Esc);

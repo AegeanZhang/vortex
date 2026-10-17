@@ -1,9 +1,8 @@
-use std::sync::Arc;
 use tokio::sync::watch;
 use tracing::info;
 
 use crate::{
-    ConversationItem, MessageRole, ModelProvider, SessionMessage, ToolCall, ToolRegistry,
+    ConversationItem, MessageRole, ModelInfo, ModelManager, SessionMessage, ToolCall, ToolRegistry,
     ToolResult,
     agent_loop::{TurnError, TurnOutput, TurnProgress, run_turn},
 };
@@ -42,11 +41,14 @@ pub struct SessionConnection {
 pub struct SessionSnapshot {
     pub messages: Vec<SessionMessage>,
     pub status: SessionStatus,
+    pub model: ModelInfo,
+    pub models: Vec<ModelInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentCommand {
     SubmitPrompt { content: String },
+    SelectModel { model_id: String },
     Shutdown,
 }
 
@@ -60,6 +62,8 @@ pub enum CoreEvent {
     CommandRejected { message: String },
     ToolCallStarted { call: ToolCall },
     ToolCallFinished { name: String, result: ToolResult },
+    ModelSelected { model: ModelInfo },
+    ModelSelectionRejected { model_id: String, message: String },
 }
 
 #[derive(Clone)]
@@ -135,13 +139,17 @@ async fn publish_event(
     }
 }
 
-pub fn start_session(provider: Arc<dyn ModelProvider>, tools: ToolRegistry) -> SessionConnection {
+//pub fn start_session(provider: Arc<dyn ModelProvider>, tools: ToolRegistry) -> SessionConnection {
+pub fn start_session(mut models: ModelManager, tools: ToolRegistry) -> SessionConnection {
     info!("Session runtime starting");
 
     let (command_sender, mut command_receiver) = tokio::sync::mpsc::channel::<AgentCommand>(32);
     let (event_sender, event_receiver) = tokio::sync::mpsc::channel::<CoreEvent>(128);
 
     let (shutdown_sender, mut shutdown_receiver) = watch::channel(false);
+
+    let initial_model = models.current().clone();
+    let available_modes = models.catalog().to_vec();
 
     tokio::spawn(async move {
         let mut history = Vec::<ConversationItem>::new();
@@ -250,11 +258,32 @@ pub fn start_session(provider: Arc<dyn ModelProvider>, tools: ToolRegistry) -> S
                         receiver: turn_receiver,
                     });
 
-                    let provider = Arc::clone(&provider);
+                    //let provider = Arc::clone(&provider);
+                    let provider = models.provider();
                     let tools = tools.clone();
                     let turn_history = history.clone();
 
                     turns.spawn(run_turn(provider, tools, turn_history, turn_sender));
+                }
+
+                RuntimeInput::Command(Some(AgentCommand::SelectModel { model_id })) => {
+                    let event = if status == SessionStatus::Running || active.is_some() {
+                        CoreEvent::ModelSelectionRejected {
+                            model_id,
+                            message: "当前 Turn 正在运行, 完成后再切换模型".into(),
+                        }
+                    } else {
+                        match models.select(&model_id) {
+                            Ok(model) => CoreEvent::ModelSelected { model },
+                            Err(error) => CoreEvent::ModelSelectionRejected {
+                                model_id,
+                                message: error.message,
+                            },
+                        }
+                    };
+                    if !publish_event(&event_sender, &mut shutdown_receiver, event).await {
+                        break;
+                    }
                 }
 
                 RuntimeInput::Shutdown
@@ -385,6 +414,8 @@ pub fn start_session(provider: Arc<dyn ModelProvider>, tools: ToolRegistry) -> S
         snapshot: SessionSnapshot {
             messages: Vec::new(),
             status: SessionStatus::Idle,
+            model: initial_model,
+            models: available_modes,
         },
         agent: AgentHandle {
             sender: command_sender,
@@ -411,8 +442,9 @@ mod tests {
     use tokio::sync::{mpsc, oneshot, watch};
 
     use crate::{
-        ConversationItem, FinishReason, MessageRole, ModelEvent, ModelProvider, ModelRequest,
-        ModelStream, ProviderError, SessionMessage, ToolRegistry,
+        ConversationItem, FinishReason, MessageRole, ModelEvent, ModelFactory, ModelInfo,
+        ModelManager, ModelProvider, ModelRequest, ModelSelectionError, ModelStream, ProviderError,
+        SessionMessage, ToolRegistry,
     };
 
     use super::{
@@ -421,6 +453,38 @@ mod tests {
     };
 
     type ModelItem = Result<ModelEvent, ProviderError>;
+
+    struct SingleModelFactory {
+        provider: Arc<dyn ModelProvider>,
+    }
+
+    impl ModelFactory for SingleModelFactory {
+        fn catalog(&self) -> Vec<ModelInfo> {
+            vec![ModelInfo {
+                id: "test-model".into(),
+                display_name: "Test model".into(),
+                provider_id: "test".into(),
+                endpoint_host: "example.test".into(),
+                supports_tools: true,
+                unavailable_reason: None,
+            }]
+        }
+
+        fn create(&self, id: &str) -> Result<Arc<dyn ModelProvider>, ModelSelectionError> {
+            if id != "test-model" {
+                return Err(ModelSelectionError {
+                    model_id: id.into(),
+                    message: "未知测试模型".into(),
+                });
+            }
+            Ok(Arc::clone(&self.provider))
+        }
+    }
+
+    fn test_models(provider: Arc<dyn ModelProvider>) -> ModelManager {
+        ModelManager::new(Arc::new(SingleModelFactory { provider }), "test-model")
+            .expect("测试模型装配成功")
+    }
 
     fn message(role: MessageRole, content: &str) -> ConversationItem {
         ConversationItem::Message(SessionMessage {
@@ -523,7 +587,7 @@ mod tests {
 
         let SessionConnection {
             agent, mut events, ..
-        } = start_session(provider.clone(), ToolRegistry::empty());
+        } = start_session(test_models(provider.clone()), ToolRegistry::empty());
 
         begin_turn(&agent, &mut events, "你好").await;
 
@@ -569,7 +633,7 @@ mod tests {
 
         let SessionConnection {
             agent, mut events, ..
-        } = start_session(provider.clone(), ToolRegistry::empty());
+        } = start_session(test_models(provider.clone()), ToolRegistry::empty());
 
         begin_turn(&agent, &mut events, "第一问").await;
 
@@ -640,7 +704,7 @@ mod tests {
 
         let SessionConnection {
             agent, mut events, ..
-        } = start_session(provider.clone(), ToolRegistry::empty());
+        } = start_session(test_models(provider.clone()), ToolRegistry::empty());
 
         begin_turn(&agent, &mut events, "第一问").await;
 
@@ -748,7 +812,7 @@ mod tests {
 
         let SessionConnection {
             agent, mut events, ..
-        } = start_session(provider, ToolRegistry::empty());
+        } = start_session(test_models(provider.clone()), ToolRegistry::empty());
 
         begin_turn(&agent, &mut events, "你好").await;
         within(started).await.expect("模型流没有启动");
@@ -794,7 +858,7 @@ mod tests {
 
         let SessionConnection {
             agent, mut events, ..
-        } = start_session(provider, ToolRegistry::empty());
+        } = start_session(test_models(provider.clone()), ToolRegistry::empty());
 
         begin_turn(&agent, &mut events, "你好").await;
         within(started).await.expect("模型流没有启动");
@@ -817,7 +881,7 @@ mod tests {
 
         let SessionConnection {
             agent, mut events, ..
-        } = start_session(provider, ToolRegistry::empty());
+        } = start_session(test_models(provider.clone()), ToolRegistry::empty());
 
         begin_turn(&agent, &mut events, "你好").await;
         within(started).await.expect("模型流没有启动");
