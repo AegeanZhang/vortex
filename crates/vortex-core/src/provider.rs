@@ -1,8 +1,34 @@
 use std::{error::Error, fmt, pin::Pin};
 
 use futures_util::Stream;
+use serde::Deserialize;
 
 use crate::{ConversationItem, ToolCall, ToolSpec};
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ThinkingMode {
+    /// 不发送思考控制参数，遵循服务端默认值。
+    #[default]
+    ProviderDefault,
+    /// 要求适配器显式关闭；无法表达时应报错。
+    Disabled,
+    //Enabled,
+}
+
+/// 模型级、跨供应商的思考选项。
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct ThinkingOptions {
+    pub mode: ThinkingMode,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct ThinkingCapabilities {
+    pub can_disable: bool,
+    pub supports_history_control: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FinishReason {

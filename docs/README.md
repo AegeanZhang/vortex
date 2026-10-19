@@ -32,6 +32,10 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：实现 config、HOME/日志入口迁移、`-m/-c` 或 `/model` 时；正式契约优先于本地实施稿。
 
+- [`design/provider-thinking-options.md`](design/provider-thinking-options.md) —— 已实现的通用思考策略、模型能力、接口方言、CLI 装配和千问/DeepSeek 关闭参数；包含离线测试与旧预设迁移边界，不代表已支持思考内容。
+
+  **什么时候查**：重构厂商请求选项，或需要显式关闭某个服务的思考模式时。
+
 理解工具版 TUI 时，建议依次阅读 `session-runtime.md`、`agent-loop.md`、
 `streaming-response.md`、`tui-interface.md` 和 `message-building.md`：先看调度与工具循环，
 再看协议和界面投影，最后区分最小请求模型与后续上下文构建目标。
@@ -121,3 +125,14 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 | `codex-tui.md` | [TUI 布局与输入调研](research/tui-layout-and-input-research.md) 已包含对应观察，不重复追加 |
 
 `rust-learn.md` 是个人学习笔记，问题尚未整理为项目规范，本次保留，不作为工程事实引用。
+
+## 临时稿回收记录（2026-10-19）
+
+| 原临时稿 | 正式文档去向 |
+| --- | --- |
+| `20261007-01.md` | [TUI 的 slash 解析、补全、菜单与退出契约](design/tui-interface.md)、[回归测试方案](engineering/regression-test-plan.md) |
+| `20261014-01.md` | [安装](design/installation.md)、[配置](design/configuration.md)、[Session](design/session-runtime.md)、[TUI](design/tui-interface.md)、[凭据](design/credentials.md) 已收录主要契约；剩余路径/配置/模型/搜索专项测试及人工验收回收到 [回归测试方案](engineering/regression-test-plan.md) |
+
+上述两份本地原稿在核对后删除，旧阶段编译缺口、临时副本路径和被当前代码取代的
+逐行迁移代码不继续维护。原稿中的待补测试仍为待补，不因回收或旧测试通过而变成
+已验证能力。保留 `rust-learn.md`；新的实施稿不作为正式文档的永久依赖。

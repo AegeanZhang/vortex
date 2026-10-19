@@ -73,11 +73,12 @@ TOML 配置映射成 `MetasoSearchOptions`，不能通过配置改变 endpoint �
 
 ## Provider 配置形状
 
-以下为当前 TUI 配置结构的片段，完整来源和校验见 [配置设计](configuration.md)。Provider 只定义连接和凭据变量名；模型与请求选项单独定义，不记录密钥值。示例服务端模型名称需自行确认账户可用性，不表示本轮已真实请求：
+以下为当前 TUI 配置结构的片段，完整来源和校验见 [配置设计](configuration.md)。Provider 定义连接、接口方言和凭据变量名；模型与请求选项单独定义，不记录密钥值。示例服务端模型名称需自行确认账户可用性，不表示本轮已真实请求：
 
 ```toml
 [providers.deepseek]
 kind         = "openai-chat"          # OpenAI 兼容的 Chat Completions
+api_flavor   = "deepseek"             # 官方接口；托管接口须按其实际方言配置
 base_url     = "https://api.deepseek.com"
 api_key_env  = "DEEPSEEK_API_KEY"     # 变量名，不是值
 
@@ -86,7 +87,13 @@ provider = "deepseek"
 model = "deepseek-v4-pro"             # 示例，须确认账户实际可用名称
 display_name = "DeepSeek Pro"
 supports_tools = true
-request_options = "plain"
+
+[models.deepseek-pro.thinking]
+mode = "disabled"
+
+[models.deepseek-pro.thinking_capabilities]
+can_disable = true
+supports_history_control = false
 ```
 
 命名说明：Codex 中的对应字段为 `model_providers.<id>.env_key`；本项目用 `api_key_env`，语义相同，取其在脱离上下文时更自解释。
@@ -95,6 +102,9 @@ Core 配置解析阶段**不读取密钥环境变量**，只记录变量名；CL
 另一职责。CLI Factory 构造目录时也不遍历读取全部 key，初始 ModelManager 或选择目标
 模型时才读取其 `api_key_env`。未选中模型缺 key 不阻止启动；密钥单测可注入 KeyReader，
 不修改全局环境或依赖真实密钥。
+
+工厂在读取所选 key 之前校验思考策略、能力与接口方言；非法组合不读取凭据。
+能力来自用户声明，不是远端探测；示例的关闭参数是否被实际模型接受仍需人工验证。
 
 本轮不新增 `vortex config` 或登录命令。可以在用户层并列定义多个 Provider，通过所选模型 profile 引用其一；只读取实际选中模型的密钥。受限项目文件不能修改连接和凭据变量名，普通配置解析与会话内模型选择不承担认证流程。
 

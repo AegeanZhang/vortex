@@ -2,7 +2,8 @@
 
 本文说明 Vortex 的构建、运行入口。产品 TUI 使用文本 SSE、工具循环与秘塔网页搜索，
 此前搜索正常路径已由作者人工跑通。本轮分层配置与模型选择已接入源码并通过编译/Review，
-专项测试与真实交互验收仍待补充；以下配置用法描述当前代码，不表示新链路已人工跑通。
+思考选项已补离线配置/装配测试，其他配置与切换专项测试、真实交互验收仍待补充；
+以下配置用法描述当前代码，不表示新链路已人工跑通。
 完整验证边界以根 README 为准。其他命令和后续能力的
 目标形态见 [`../design/cli-surface.md`](../design/cli-surface.md)，不要把设计文档中的
 未实现部分当成现有功能。
@@ -52,8 +53,8 @@ cargo run -p vortex-cli --locked
 ```
 
 产品本身不读取 `.env`。输入 Prompt 后按 Enter 提交，输入 `/exit` 后按 Enter 退出。
-当前没有 Ctrl+C 退出映射；内置 Qwen profile 使用 `qwen-stage-a` 请求选项，显式关闭
-思考及思考历史。模型连接和搜索选项来自分层 TOML，不再要求修改 CLI 源码。
+当前没有 Ctrl+C 退出映射；内置 Qwen profile 使用 DashScope 方言、disabled 策略及
+显式能力声明，关闭思考及思考历史。模型连接和搜索选项来自分层 TOML，不再要求修改 CLI 源码。
 HOME 默认是原生用户主目录下 `.vortex`，无需设置 VORTEX_HOME；显式覆盖必须为非空
 绝对路径，例如 `export VORTEX_HOME="${HOME}/.vortex-dev"`。启动时在进入 TUI 前显示
 cwd、HOME、两条配置路径及 loaded/missing 状态、最终模型/Provider/host。
@@ -72,6 +73,7 @@ default_model = "qwen-max"
 
 [providers.qwen]
 kind = "openai-chat"
+api_flavor = "dashscope"
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 api_key_env = "QWEN_API_KEY"
 
@@ -80,7 +82,13 @@ provider = "qwen"
 model = "qwen3.8-max"
 display_name = "Qwen Max"
 supports_tools = true
-request_options = "qwen-stage-a"
+
+[models.qwen-max.thinking]
+mode = "disabled"
+
+[models.qwen-max.thinking_capabilities]
+can_disable = true
+supports_history_control = true
 
 [search]
 enabled = true
@@ -91,10 +99,13 @@ connect_timeout_secs = 5
 request_timeout_secs = 20
 ```
 
-Provider 定义连接和密钥变量名；模型 profile 定义服务端名称、能力和请求选项。可按相同
+Provider 定义连接、接口方言和密钥变量名；模型 profile 定义服务端名称、能力和请求选项。可按相同
 结构添加多个 profile，再用 `-m` 或 `/model` 选择其 ID，不直接输入服务端模型名。
 `supports_tools` 是用户声明而非远端探测；启用搜索时所选模型必须声明支持工具调用。
-`plain` 省略 Qwen 扩展，不代表已实现 Thinking；当前文本阶段仍拒绝思考增量。
+`thinking.mode` 缺省为 `provider-default`，省略参数而不是关闭思考；当前文本阶段仍拒绝
+思考增量。显式 disabled 要求 can_disable=true，并与接口方言匹配。DeepSeek 官方与
+百炼托管接入的参数不同，不能仅按模型名称配置；完整示例与旧字段迁移见
+[思考选项设计](../design/provider-thinking-options.md)。旧 request_options 字段已不接受。
 
 项目文件只检查启动 cwd 下的 `.vortex/project.toml`，不读取父目录或 Git 根。示例：
 
@@ -107,7 +118,7 @@ max_results = 3
 ```
 
 项目只能引用已有模型、关闭搜索或降低用户层的条数，不能新增 endpoint、凭据变量名、
-模型或请求预设。项目目录/文件不允许符号链接；完整信任系统和 Windows junction 验收
+模型、接口方言、思考策略或能力。项目目录/文件不允许符号链接；完整信任系统和 Windows junction 验收
 尚未完成。用户 HOME 默认可信，不要将陌生仓库中的 `.vortex` 指定为用户配置来源。
 
 优先级是内置 → 用户 → 受限项目 → 重复 `-c`（后者优先）→ `-m`。用户层同 ID 条目
@@ -136,13 +147,14 @@ cargo run -p vortex-cli --locked -- -c 'search.max_results=3'
 
 切换仅本会话、保留历史、不修改默认配置；后续历史可能发送给新 Provider。重启按配置
 和启动覆盖重新选择。确认成功只表示本地装配，不代表远端鉴权成功。该交互仍需专项
-回归和真实终端验收，当前旧菜单测试尚有失败项，不能认定整套功能验收完成。
+回归和真实终端验收；旧菜单测试已完成适配，不能将旧测试通过等同于新配置/切换链路
+的专项验收完成。实际检查记录见根 README。
 
 源码中的响应链路已改为 SSE 增量展示，不再等待完整回答后一次显示；它按服务端增量更新，
 不是本地逐字动画。CLI 默认注册的 `web_search` 调用秘塔独立网页搜索 API，不调用问答
 接口、不抓取来源全文；搜索结果回填给当前选中的模型，再由模型继续回答。查询会发送给秘塔，Prompt、
 工具定义与工具结果会发送给当前选中模型，两个服务可能分别计费；不要在查询中放入敏感内容。
-`MockWebSearch` 仅在显式配置时注册，不是默认工具。Thinking、定时刷新、会话恢复、
+`MockWebSearch` 仅在显式配置时注册，不是默认工具。Thinking 内容展示/回传、定时刷新、会话恢复、
 保留会话的 Turn 取消、MCP 和沙箱尚未实现。已实现代码的
 设计入口是 [`../design/session-runtime.md`](../design/session-runtime.md) 和
 [`../design/tui-interface.md`](../design/tui-interface.md)。

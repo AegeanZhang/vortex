@@ -1,12 +1,15 @@
 use serde::{Deserialize, de::DeserializeOwned};
 use std::{collections::BTreeMap, fmt, path::PathBuf};
 
+use crate::{ThinkingCapabilities, ThinkingOptions};
+
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderKind {
     OpenaiChat,
 }
 
+/*
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RequestOptions {
@@ -14,11 +17,23 @@ pub enum RequestOptions {
     Plain,
     QwenStageA,
 }
+*/
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApiFlavor {
+    #[default]
+    Generic,
+    Dashscope,
+    Deepseek,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
     pub kind: ProviderKind,
+    #[serde(default)]
+    pub api_flavor: ApiFlavor,
     pub base_url: String,
     pub api_key_env: String,
 }
@@ -30,8 +45,11 @@ pub struct ModelConfig {
     pub model: String,
     pub display_name: String,
     pub supports_tools: bool,
+    //pub request_options: RequestOptions,
     #[serde(default)]
-    pub request_options: RequestOptions,
+    pub thinking: ThinkingOptions,
+    #[serde(default)]
+    pub thinking_capabilities: ThinkingCapabilities,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -162,6 +180,7 @@ impl Default for AppConfig {
                 "qwen".into(),
                 ProviderConfig {
                     kind: ProviderKind::OpenaiChat,
+                    api_flavor: ApiFlavor::Dashscope,
                     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".into(),
                     api_key_env: "QWEN_API_KEY".into(),
                 },
@@ -173,7 +192,14 @@ impl Default for AppConfig {
                     model: "qwen3.8-max".into(),
                     display_name: "Qwen Max".into(),
                     supports_tools: true,
-                    request_options: RequestOptions::QwenStageA,
+                    //request_options: RequestOptions::QwenStageA,
+                    thinking: ThinkingOptions {
+                        mode: crate::ThinkingMode::Disabled,
+                    },
+                    thinking_capabilities: ThinkingCapabilities {
+                        can_disable: true,
+                        supports_history_control: true,
+                    },
                 },
             )]),
             search: SearchConfig {
@@ -515,4 +541,181 @@ fn check_project_path(path: &std::path::Path) -> Result<(), ConfigError> {
         return Err(ConfigError::Invalid("项目配置路径越过工作区边界"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ThinkingMode;
+
+    #[test]
+    fn builtin_qwen_explicitly_disables_thinking() {
+        let config = AppConfig::default();
+        assert_eq!(config.providers["qwen"].api_flavor, ApiFlavor::Dashscope);
+        assert_eq!(
+            config.models["qwen-max"].thinking.mode,
+            ThinkingMode::Disabled
+        );
+        assert_eq!(
+            config.models["qwen-max"].thinking_capabilities,
+            ThinkingCapabilities {
+                can_disable: true,
+                supports_history_control: true,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_official_and_hosted_models_with_distinct_flavors() {
+        let patch: UserConfigPatch = toml::from_str(
+            r#"
+[providers.example]
+kind = "openai-chat"
+api_flavor = "deepseek"
+base_url = "https://example.test"
+api_key_env = "FIXTURE_KEY"
+
+[providers.hosted]
+kind = "openai-chat"
+api_flavor = "dashscope"
+base_url = "https://hosted.example.test/compatible-mode/v1"
+api_key_env = "HOSTED_FIXTURE_KEY"
+
+[models.fixture]
+provider = "example"
+model = "deepseek-v4-pro"
+display_name = "Fixture"
+supports_tools = true
+
+[models.fixture.thinking]
+mode = "disabled"
+
+[models.fixture.thinking_capabilities]
+can_disable = true
+supports_history_control = false
+
+[models.hosted]
+provider = "hosted"
+model = "deepseek-v4-pro"
+display_name = "Hosted fixture"
+supports_tools = true
+
+[models.hosted.thinking]
+mode = "disabled"
+
+[models.hosted.thinking_capabilities]
+can_disable = true
+supports_history_control = false
+"#,
+        )
+        .unwrap();
+        assert_eq!(patch.providers["example"].api_flavor, ApiFlavor::Deepseek);
+        assert_eq!(patch.providers["hosted"].api_flavor, ApiFlavor::Dashscope);
+        assert_eq!(patch.models["fixture"].model, patch.models["hosted"].model);
+        assert_eq!(
+            patch.models["fixture"].thinking.mode,
+            ThinkingMode::Disabled
+        );
+        assert_eq!(patch.models["hosted"].thinking.mode, ThinkingMode::Disabled);
+        for id in ["fixture", "hosted"] {
+            assert!(patch.models[id].thinking_capabilities.can_disable);
+            assert!(
+                !patch.models[id]
+                    .thinking_capabilities
+                    .supports_history_control
+            );
+        }
+    }
+
+    #[test]
+    fn omitted_options_use_defaults_and_replacement_does_not_inherit() {
+        let patch: UserConfigPatch = toml::from_str(
+            r#"
+[providers.qwen]
+kind = "openai-chat"
+base_url = "https://example.test"
+api_key_env = "FIXTURE_KEY"
+
+[models.qwen-max]
+provider = "qwen"
+model = "fixture-model"
+display_name = "Fixture"
+supports_tools = true
+"#,
+        )
+        .unwrap();
+        let mut config = AppConfig::default();
+        config.apply_user(patch);
+        assert_eq!(config.providers["qwen"].api_flavor, ApiFlavor::Generic);
+        assert_eq!(
+            config.models["qwen-max"].thinking.mode,
+            ThinkingMode::ProviderDefault
+        );
+        assert_eq!(
+            config.models["qwen-max"].thinking_capabilities,
+            ThinkingCapabilities::default()
+        );
+        assert!(!config.models["qwen-max"].thinking_capabilities.can_disable);
+        assert!(
+            !config.models["qwen-max"]
+                .thinking_capabilities
+                .supports_history_control
+        );
+    }
+
+    #[test]
+    fn rejects_old_fields_enabled_mode_and_unknown_options() {
+        let model = r#"
+[models.fixture]
+provider = "qwen"
+model = "fixture-model"
+display_name = "Fixture"
+supports_tools = true
+"#;
+        for value in ["plain", "qwen-stage-a"] {
+            let text = format!("{model}\nrequest_options = \"{value}\"\n");
+            assert!(toml::from_str::<UserConfigPatch>(&text).is_err());
+        }
+        for extra in [
+            "[models.fixture.thinking]\nmode = \"enabled\"",
+            "[models.fixture.thinking]\nmode = \"disabled\"\nunknown = true",
+            "[models.fixture.thinking_capabilities]\ncan_disable = \"true\"",
+            "[models.fixture.thinking_capabilities]\ncan_disable = true\nunknown = true",
+        ] {
+            assert!(toml::from_str::<UserConfigPatch>(&format!("{model}\n{extra}")).is_err());
+        }
+        let provider = r#"
+[providers.fixture]
+kind = "openai-chat"
+base_url = "https://example.test"
+api_key_env = "FIXTURE_KEY"
+"#;
+        for flavor in ["unknown", "qwen"] {
+            assert!(
+                toml::from_str::<UserConfigPatch>(&format!(
+                    "{provider}\napi_flavor = \"{flavor}\""
+                ),)
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn project_and_cli_cannot_override_thinking_definitions() {
+        for text in [
+            "[providers.qwen]\napi_flavor = \"dashscope\"",
+            "[models.qwen-max.thinking]\nmode = \"disabled\"",
+            "[models.qwen-max.thinking_capabilities]\ncan_disable = true",
+        ] {
+            assert!(toml::from_str::<ProjectConfigPatch>(text).is_err());
+        }
+        let mut config = AppConfig::default();
+        for value in [
+            "providers.qwen.api_flavor=\"dashscope\"",
+            "models.qwen-max.thinking.mode=\"disabled\"",
+            "models.qwen-max.thinking_capabilities.can_disable=true",
+        ] {
+            assert!(config.apply_override(value).is_err());
+        }
+    }
 }

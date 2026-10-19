@@ -225,10 +225,12 @@ Provider 错误、缺少终态、task 异常、Length、ContentFilter、空最�
 `vortex-provider::OpenAiChatProvider` 是当前唯一实现。它把 `MessageRole` 映射为
 OpenAI-compatible Chat Completions 的 `user`、`assistant`、`system`，发送
 `stream: true`，将 SSE choice 0 的正文转换为 TextDelta，并组装单个完整 ToolCall。
-请求中的工具定义/调用/结果映射见 [Agent loop](agent-loop.md)。泛用构造器省略千问专用参数；
-CLI 工厂按模型 profile 的 `request_options` 映射：`plain` 不带 Qwen 扩展，`qwen-stage-a`
-用 `QwenThinkingOptions` 显式关闭思考及思考历史；后者也是内置 Qwen profile 的预设。
-同 Provider 的不同模型不共用请求选项。工厂注入共享 Reqwest client，Core 不依赖其类型。
+请求中的工具定义/调用/结果映射见 [Agent loop](agent-loop.md)。泛用构造器默认不发送思考控制参数；
+CLI 工厂将 Provider 的 api_flavor 与模型的 thinking/thinking_capabilities 装配为
+`OpenAiChatOptions`，先校验再读取 key。内置 Qwen 使用 DashScope 方言并显式关闭
+思考及思考历史；DeepSeek 官方使用独立字段，不能混用。具体转换见
+[思考选项设计](provider-thinking-options.md)。同 Provider 的不同模型不共用请求选项。
+工厂注入共享 Reqwest client，Core 不依赖其类型。
 仅改变思考开关不能完成 Thinking 接入。
 
 Provider 负责 HTTP 状态、SSE Content-Type、分帧与 JSON 校验，并要求合法 `finish_reason`

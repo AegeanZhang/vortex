@@ -16,7 +16,7 @@
 
 | 阶段 | 请求与展示 | 历史策略 |
 | --- | --- | --- |
-| A：文本/工具 SSE | 千问显式关闭思考，正文增量与单个工具调用分别处理 | 完成的工具步骤与最终成功回答进入历史 |
+| A：文本/工具 SSE | 按接口方言与模型能力显式关闭思考，正文增量与单个工具调用分别处理 | 完成的工具步骤与最终成功回答进入历史 |
 | B：Thinking 展示 | 显式开启思考，思考纯文本与 Markdown 回答分区 | 显式关闭思考回传，思考仅保留于本次 UI |
 | C：思考历史（可选后续） | 启用前先扩展语义消息及请求映射 | 成功回答的思考独立保存，按支持的协议完整回传 |
 
@@ -186,8 +186,17 @@ Length、ContentFilter、不支持的响应、空最终回答、非法 ID、工�
 
 ## 6. Thinking 参数与能力边界
 
-对当前千问使用显式配置，不根据模型名字符串暗中推断。CLI 在装配时给 Provider 传入
-千问专用选项；泛用 OpenAI-compatible 请求默认省略这些厂商参数。推荐阶段参数：
+请求侧的跨供应商装配已按 [思考选项设计](provider-thinking-options.md) 接入并补离线测试：
+统一策略不等于统一厂商 JSON，不发送参数也不等于关闭思考。此次不修改当前
+ReasoningDelta 的拒绝行为。后续阶段 B/C 的拆分必须按协议能力判断；对于带 tools 时
+要求回传思考历史的服务，不能只启用展示而遗漏请求历史支持。
+
+CLI 将配置的接口方言、模型策略与能力装配成 `OpenAiChatOptions`，不按模型名推断。
+Provider 通过统一 `with_options` 校验并保存转换结果：DashScope 按能力发送关闭字段，
+DeepSeek 官方发送 thinking.type=disabled。Generic 只支持 ProviderDefault；默认省略
+控制字段，Disabled 不可表达时本地失败。旧千问专用 builder 已移除。
+
+下表仅是千问后续阶段的参数参考，不是当前配置支持的策略列表；B/C 尚未实现：
 
 | 阶段 | stream | enable_thinking | preserve_thinking |
 | --- | --- | --- | --- |

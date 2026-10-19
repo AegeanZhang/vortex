@@ -6,7 +6,7 @@ mod paths;
 
 use clap::{Parser, Subcommand};
 use exec::execute;
-use std::{env, error::Error};
+use std::error::Error;
 
 use vortex_tui::options::TuiOptions;
 use vortex_tui::run;
@@ -68,43 +68,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             execute(prompt).await?;
         }
         None => {
-            //let api_key = env::var("DEEPSEEK_API_KEY")?;
-            //let api_key = env::var("QWEN_API_KEY")?;
-
-            /*let provider = Arc::new(OpenAiChatProvider::new(
-                "https://api.deepseek.com",
-                "deepseek-v4-pro",
-                api_key,
-            ));
-            let provider = Arc::new(
-                OpenAiChatProvider::new(
-                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    "qwen3.8-max",
-                    api_key,
-                )
-                .with_qwen_thinking(QwenThinkingOptions {
-                    enabled: false,
-                    preserve_history: false,
-                }),
-            );
-
-            let metaso_api_key = env::var("METASO_API_KEY").map_err(|error| {
-                let message = match error {
-                    env::VarError::NotPresent => "缺少环境变量 METASO_API_KEY, 请在启动前导出",
-                    env::VarError::NotUnicode(_) => {
-                        "环境变量 METASO_API_KEY 不是有效的 Unicode 字符串"
-                    }
-                };
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, message)
-            })?;
-
-            let search = MetasoWebSearch::new(metaso_api_key)?;
-            let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(search)];
-            let tools = ToolRegistry::new(tools)?;
-
-            let connection = start_session(provider, tools);
-            let tui_options = TuiOptions { color: None };
-            */
             let connection = bootstrap::start_tui_session(&paths, cli.config, cli.model).await?;
             run(connection, TuiOptions { color: None }).await?;
         }

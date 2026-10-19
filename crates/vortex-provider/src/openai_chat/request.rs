@@ -1,12 +1,7 @@
-use super::QwenThinkingOptions;
+//use super::QwenThinkingOptions;
+use super::options::ThinkingRequestFields;
 use serde::Serialize;
 use vortex_core::{ConversationItem, MessageRole, ModelRequest, ToolCall, ToolSpec};
-
-/*#[derive(Debug, Serialize)]
-struct ChatMessage {
-    role: &'static str,
-    content: String,
-}*/
 
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
@@ -54,19 +49,6 @@ struct ChatFunctionDefinition {
     description: String,
     parameters: serde_json::Value,
 }
-
-/*impl From<SessionMessage> for ChatMessage {
-    fn from(message: SessionMessage) -> Self {
-        Self {
-            role: match message.role {
-                MessageRole::User => "user",
-                MessageRole::Assistant => "assistant",
-                MessageRole::System => "system",
-            },
-            content: message.content,
-        }
-    }
-}*/
 
 fn map_tool_call(call: ToolCall, content: Option<String>) -> ChatMessage {
     ChatMessage::AssistantToolCall {
@@ -144,39 +126,24 @@ pub(super) struct ChatRequest {
     model: String,
     messages: Vec<ChatMessage>,
     stream: bool,
+    /*
     #[serde(skip_serializing_if = "Option::is_none")]
     enable_thinking: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     preserve_thinking: Option<bool>,
+    */
+    #[serde(flatten)]
+    thinking_fields: ThinkingRequestFields,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tools: Vec<ChatTool>,
 }
 
 impl ChatRequest {
-    /*pub(super) fn from_model_request(
-        model: String,
-        model_request: ModelRequest,
-        thinking: Option<QwenThinkingOptions>,
-    ) -> Self {
-        let messages = model_request
-            .messages
-            .into_iter()
-            .map(ChatMessage::from)
-            .collect();
-
-        Self {
-            model,
-            messages,
-            stream: true,
-            enable_thinking: thinking.map(|options| options.enabled),
-            preserve_thinking: thinking.map(|options| options.preserve_history),
-        }
-    }*/
-
     pub(super) fn from_model_request(
         model: String,
         model_request: ModelRequest,
-        thinking: Option<QwenThinkingOptions>,
+        //thinking: Option<QwenThinkingOptions>,
+        thinking_fields: ThinkingRequestFields,
     ) -> Self {
         let ModelRequest { items, tools } = model_request;
 
@@ -185,8 +152,142 @@ impl ChatRequest {
             messages: map_messages(items),
             tools: tools.into_iter().map(map_tool_spec).collect(),
             stream: true,
-            enable_thinking: thinking.map(|options| options.enabled),
-            preserve_thinking: thinking.map(|options| options.preserve_history),
+            //enable_thinking: thinking.map(|options| options.enabled),
+            //preserve_thinking: thinking.map(|options| options.preserve_history),
+            thinking_fields,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::openai_chat::{OpenAiChatDialect, OpenAiChatOptions};
+    use serde_json::{Value, json};
+    use vortex_core::{
+        SessionMessage, ThinkingCapabilities, ThinkingMode, ThinkingOptions, ToolResult,
+    };
+
+    fn thinking_fields(
+        dialect: OpenAiChatDialect,
+        supports_history_control: bool,
+    ) -> ThinkingRequestFields {
+        OpenAiChatOptions {
+            dialect,
+            thinking: ThinkingOptions {
+                mode: ThinkingMode::Disabled,
+            },
+            thinking_capabilities: ThinkingCapabilities {
+                can_disable: true,
+                supports_history_control,
+            },
+        }
+        .into_request_fields()
+        .unwrap()
+    }
+
+    #[test]
+    fn default_request_preserves_minimal_shape() {
+        let request = ChatRequest::from_model_request(
+            "fixture-model".into(),
+            ModelRequest {
+                items: vec![ConversationItem::Message(SessionMessage {
+                    role: MessageRole::User,
+                    content: "fixture prompt".into(),
+                })],
+                tools: vec![],
+            },
+            ThinkingRequestFields::default(),
+        );
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            json!({
+                "model": "fixture-model",
+                "messages": [{"role": "user", "content": "fixture prompt"}],
+                "stream": true,
+            })
+        );
+    }
+
+    #[test]
+    fn changing_profile_only_changes_thinking_fields() {
+        let fixture = ModelRequest {
+            items: vec![
+                ConversationItem::Message(SessionMessage {
+                    role: MessageRole::User,
+                    content: "fixture prompt".into(),
+                }),
+                ConversationItem::Message(SessionMessage {
+                    role: MessageRole::Assistant,
+                    content: "fixture prefix".into(),
+                }),
+                ConversationItem::ToolCall(ToolCall {
+                    call_id: "fixture-call".into(),
+                    name: "web_search".into(),
+                    arguments: json!({"query": "rust"}),
+                }),
+                ConversationItem::ToolResult(ToolResult {
+                    call_id: "fixture-call".into(),
+                    output: "fixture result".into(),
+                    is_error: false,
+                }),
+            ],
+            tools: vec![ToolSpec {
+                name: "web_search".into(),
+                description: "fixture tool".into(),
+                input_schema: json!({"type": "object"}),
+            }],
+        };
+        let base = json!({
+            "model": "fixture-model",
+            "stream": true,
+            "messages": [
+                {"role": "user", "content": "fixture prompt"},
+                {
+                    "role": "assistant",
+                    "content": "fixture prefix",
+                    "tool_calls": [{
+                        "id": "fixture-call",
+                        "type": "function",
+                        "function": {"name": "web_search", "arguments": "{\"query\":\"rust\"}"},
+                    }],
+                },
+                {"role": "tool", "tool_call_id": "fixture-call", "content": "fixture result"},
+            ],
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "fixture tool",
+                    "parameters": {"type": "object"},
+                },
+            }],
+        });
+
+        for (dialect, history) in [
+            (OpenAiChatDialect::DashScope, true),
+            (OpenAiChatDialect::DeepSeek, false),
+            (OpenAiChatDialect::DashScope, false),
+        ] {
+            let request = ChatRequest::from_model_request(
+                "fixture-model".into(),
+                fixture.clone(),
+                thinking_fields(dialect, history),
+            );
+            let mut expected: Value = base.clone();
+            match dialect {
+                OpenAiChatDialect::DashScope => {
+                    expected["enable_thinking"] = json!(false);
+                    if history {
+                        expected["preserve_thinking"] = json!(false);
+                    }
+                }
+                OpenAiChatDialect::DeepSeek => {
+                    expected["thinking"] = json!({"type": "disabled"});
+                }
+                OpenAiChatDialect::Generic => unreachable!("fixture only uses supported dialects"),
+            }
+            assert_eq!(serde_json::to_value(request).unwrap(), expected);
         }
     }
 }

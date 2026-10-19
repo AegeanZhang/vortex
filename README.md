@@ -6,10 +6,11 @@ Vortex 是一个使用 Rust 编写、以学习实现细节为目的的终端 Age
 > 工具执行，Provider 组装完整 ToolCall，Core 回填工具结果，TUI 流式展示 Assistant Markdown。
 > TUI 已接入分层 TOML、模型 profile 与 `/model` 会话内切换，搜索可关闭或选择秘塔/Mock。
 > 默认 `web_search` 调用秘塔独立搜索 API，再由当前模型生成回答；作者此前已反馈搜索正常
-> 路径可运行。新配置/切换链路已通过编译与代码 Review，专项测试和真实交互验收仍待补充。
+> 路径可运行。新配置/切换链路已通过编译与代码 Review，思考选项已补离线测试，其他专项与真实交互验收仍待补充。
 
 Transcript 已接入 Assistant Markdown、键盘翻页与鼠标滚轮；相关回归测试仍需补充，
 滑块视觉断裂问题暂缓处理。当前处于文本 SSE 阶段 A，默认 Qwen profile 显式关闭思考及思考历史；
+已支持按接口方言、模型策略与能力装配关闭参数，涵盖 DeepSeek 官方与百炼托管接入，未启用思考内容处理。
 阶段 B/C 的 Thinking 契约见 [`docs/design/streaming-response.md`](docs/design/streaming-response.md)。
 Shutdown 可通知 Session 中止活跃流，但尚无保留会话的 `CancelTurn`；exec 未迁移到流式链路。
 
@@ -28,7 +29,7 @@ Resize 主动重绘，按键 Release 与确认键 Repeat 已过滤；Paste、动
 TUI 仅用状态栏展示工具开始/完成，不显示工具卡片或来源引用。设计见
 [`Agent loop 与搜索工具`](docs/design/agent-loop.md)。秘塔工具已实现参数校验、超时和
 响应/输出大小限制，但注册表尚无通用 Schema 校验、工具超时或预算治理。
-Thinking、会话恢复、网页正文读取、MCP 和沙箱仍未实现。
+Thinking 内容展示/回传、会话恢复、网页正文读取、MCP 和沙箱仍未实现。
 
 验证边界（2026-10-01）：产品测试共 15 个并通过（含 1 个沙箱占位测试），release 构建通过。
 Core 的 7 个测试覆盖无工具文本流的增量顺序、
@@ -63,6 +64,17 @@ Slash 补充验证（2026-10-13）：本次执行 `cargo check --workspace --all
 本轮专项测试由作者决定暂缓；配置优先级、凭据延迟读取、模型切换/确认、草稿保护、
 搜索参数和跨平台路径等专项回归尚未补齐。真实 API/终端及 Windows/macOS 验收仍需
 后续执行。此前搜索成功不等于本轮切换链路已人工跑通。
+
+思考选项补充验证（2026-10-19）：请求装配已迁移为 Provider 接口方言、模型策略与能力；
+旧 request_options 和千问专用 builder 不再作为有效入口。新增 22 项离线测试，覆盖配置
+默认值/替换/拒绝规则、三种接入的精确 JSON、消息/工具映射不变、builder 字段无残留、
+非法组合先于凭据读取、所选凭据按需读取、同 Provider 能力隔离及切换失败保留原绑定。
+`cargo check --workspace --all-targets --locked`、`cargo fmt --all -- --check`、
+`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`、
+`cargo test --workspace --all-features --locked` 和 `cargo build --release --locked` 均通过；
+单元测试共 70 项（CLI 7、Core 12、Provider 10、TUI 40、沙箱占位 1）。
+本轮未调用真实 API、读取真实凭据或进行终端交互验收。参数被远端接受、确实关闭思考、
+正文与工具往返仍待作者验证；未补齐完整配置文件/路径、HTTP/SSE、工具循环及 TUI 模型切换矩阵。
 
 ## 首版方向
 
@@ -109,7 +121,9 @@ TUI 配置优先级为内置默认值 → 用户 `<vortex-home>/config.toml` →
 `.vortex`，显式 `VORTEX_HOME` 必须是非空绝对路径；日志与配置共用同一解析结果。
 项目配置不向父目录查找，只能引用已有模型、关闭搜索或降低条数，不能新增服务地址或凭据来源。
 
-Provider profile 定义连接与密钥变量名，模型 profile 定义服务端模型、能力和请求选项。
+Provider profile 定义连接、接口方言与密钥变量名，模型 profile 定义服务端模型、能力和请求选项。
+thinking.mode 支持 provider-default（省略参数，不等于关闭）或 disabled；后者要求声明
+关闭能力且方言能够表达。详见 [思考选项设计](docs/design/provider-thinking-options.md)。
 只读取选中模型的 key；搜索关闭或 Mock 不读搜索 key，秘塔缺 key 不回退 Mock。
 默认模型/搜索分别使用 `QWEN_API_KEY`、`METASO_API_KEY`；密钥值只允许通过环境变量
 提供，不写入仓库或 TOML。`-m/-c` 当前只接入 TUI，旧 exec 收到它们明确失败。
@@ -148,6 +162,6 @@ TRACE；这只解决已知日志点，不代表所有日志/错误路径已完�
 1. 初始化 Rust 2024 Cargo workspace，完成 Provider 抽象、Session 事件接口和非流式 TUI v1。（已完成）
 2. 补齐文本 SSE、Mock 工具循环、Provider 转换和 TUI 工具状态测试，完成真实终端验收。
 3. 秘塔真实搜索已接入，正常路径已由作者人工跑通；补齐异常与边界回归，再扩展其他内置工具及通用校验、超时和预算治理；独立推进 Thinking、重绘节流和 Turn 取消。
-4. 模型/搜索 TOML 配置与 `/model` 首版已接入；补专项测试、旧菜单回归适配和真实交互验收。
+4. 模型/搜索 TOML 配置与 `/model` 首版已接入，旧菜单回归已适配；思考选项装配及离线测试已完成，继续补其他配置/切换专项和真实交互验收。
 5. 实现 JSONL 会话恢复、`bubblewrap` 沙箱和 stdio MCP client，并将 exec 迁移到共享 Session。
 6. 完善安装、CI、发布包、可观测性与跨平台抽象。
