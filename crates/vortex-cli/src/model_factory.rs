@@ -43,16 +43,22 @@ pub(crate) struct ConfiguredModelFactory {
     client: reqwest::Client,
     read_key: Arc<KeyReader>,
     catalog: Vec<ModelInfo>,
+    requires_tools: bool,
 }
 
 impl ConfiguredModelFactory {
-    pub(crate) fn new(config: AppConfig, client: reqwest::Client) -> Result<Self, ConfigError> {
-        Self::with_key_reader(config, client, Arc::new(read_api_key))
+    pub(crate) fn new(
+        config: AppConfig,
+        client: reqwest::Client,
+        requires_tools: bool,
+    ) -> Result<Self, ConfigError> {
+        Self::with_key_reader(config, client, requires_tools, Arc::new(read_api_key))
     }
 
     fn with_key_reader(
         config: AppConfig,
         client: reqwest::Client,
+        requires_tools: bool,
         read_key: Arc<KeyReader>,
     ) -> Result<Self, ConfigError> {
         config.validate()?;
@@ -75,8 +81,8 @@ impl ConfiguredModelFactory {
                     provider_id: model.provider.clone(),
                     endpoint_host: host.into(),
                     supports_tools: model.supports_tools,
-                    unavailable_reason: (config.search.enabled && !model.supports_tools)
-                        .then(|| "当前搜索工具已启用，该模型未声明工具调用支持".into()),
+                    unavailable_reason: (requires_tools && !model.supports_tools)
+                        .then(|| "当前已注册工具，该模型未声明工具调用支持".into()),
                 })
             })
             .collect::<Result<Vec<_>, ConfigError>>()?;
@@ -85,6 +91,7 @@ impl ConfiguredModelFactory {
             client,
             read_key,
             catalog,
+            requires_tools,
         })
     }
 }
@@ -123,8 +130,8 @@ impl ModelFactory for ConfiguredModelFactory {
             .models
             .get(id)
             .ok_or_else(|| fail("不存在这个模型 profile".into()))?;
-        if self.config.search.enabled && !model.supports_tools {
-            return Err(fail("当前搜索工具要求模型支持工具调用".into()));
+        if self.requires_tools && !model.supports_tools {
+            return Err(fail("当前已注册工具，该模型未声明工具调用支持".into()));
         }
         let profile = self
             .config
@@ -177,6 +184,7 @@ mod tests {
         let factory = ConfiguredModelFactory::with_key_reader(
             config,
             test_client(),
+            true,
             Arc::new(|_| panic!("invalid options must not read a key")),
         )
         .unwrap();
@@ -196,6 +204,7 @@ mod tests {
         let factory = ConfiguredModelFactory::with_key_reader(
             config,
             test_client(),
+            true,
             Arc::new(|_| panic!("missing capability must not read a key")),
         )
         .unwrap();
@@ -211,6 +220,7 @@ mod tests {
         let factory = ConfiguredModelFactory::with_key_reader(
             config,
             test_client(),
+            true,
             Arc::new(|_| panic!("invalid history capability must not read a key")),
         )
         .unwrap();
@@ -253,6 +263,7 @@ mod tests {
             ConfiguredModelFactory::with_key_reader(
                 config,
                 test_client(),
+                true,
                 Arc::new(move |name| {
                     captured.lock().unwrap().push(name.into());
                     Ok("fixture-key".into())
@@ -326,6 +337,7 @@ mod tests {
         let factory = ConfiguredModelFactory::with_key_reader(
             config_with_undeclared_model(),
             test_client(),
+            true,
             Arc::new(move |name| {
                 captured.lock().unwrap().push(name.into());
                 Ok("fixture-key".into())
@@ -351,6 +363,7 @@ mod tests {
             ConfiguredModelFactory::with_key_reader(
                 config_with_undeclared_model(),
                 test_client(),
+                true,
                 Arc::new(move |name| {
                     captured.lock().unwrap().push(name.into());
                     Ok("fixture-key".into())
@@ -365,5 +378,71 @@ mod tests {
         assert_eq!(manager.current().id, "qwen-max");
         assert!(Arc::ptr_eq(&original, &manager.provider()));
         assert_eq!(*reads.lock().unwrap(), vec!["QWEN_API_KEY".to_string()]);
+    }
+
+    #[test]
+    fn actual_tools_disable_incompatible_models_even_when_search_is_off() {
+        let mut config = AppConfig::default();
+        config.search.enabled = false;
+        config.models.get_mut("qwen-max").unwrap().supports_tools = false;
+        let factory = ConfiguredModelFactory::with_key_reader(
+            config,
+            test_client(),
+            true,
+            Arc::new(|_| panic!("incompatible model must not read a key")),
+        )
+        .unwrap();
+        let catalog = factory.catalog();
+        let info = catalog.iter().find(|info| info.id == "qwen-max").unwrap();
+        assert!(
+            info.unavailable_reason
+                .as_deref()
+                .unwrap()
+                .contains("已注册工具")
+        );
+        let error = factory.create("qwen-max").err().unwrap();
+        assert!(error.message.contains("已注册工具"));
+    }
+
+    #[test]
+    fn empty_tool_requirement_allows_a_model_without_tools() {
+        let mut config = AppConfig::default();
+        config.search.enabled = false;
+        config.models.get_mut("qwen-max").unwrap().supports_tools = false;
+        let factory = ConfiguredModelFactory::with_key_reader(
+            config,
+            test_client(),
+            false,
+            Arc::new(|_| Ok("fixture-key-not-a-real-secret".into())),
+        )
+        .unwrap();
+        assert!(
+            factory
+                .catalog()
+                .iter()
+                .all(|info| info.unavailable_reason.is_none())
+        );
+        assert!(factory.create("qwen-max").is_ok());
+    }
+
+    #[test]
+    fn failed_selection_for_tool_capability_keeps_current_model() {
+        let mut config = AppConfig::default();
+        config.search.enabled = false;
+        let mut unsupported = config.models.get("qwen-max").unwrap().clone();
+        unsupported.supports_tools = false;
+        config.models.insert("without-tools".into(), unsupported);
+        let factory = ConfiguredModelFactory::with_key_reader(
+            config,
+            test_client(),
+            true,
+            Arc::new(|_| Ok("fixture-key-not-a-real-secret".into())),
+        )
+        .unwrap();
+        let mut manager = ModelManager::new(Arc::new(factory), "qwen-max").unwrap();
+        let original = manager.provider();
+        assert!(manager.select("without-tools").is_err());
+        assert_eq!(manager.current().id, "qwen-max");
+        assert!(Arc::ptr_eq(&original, &manager.provider()));
     }
 }

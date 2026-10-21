@@ -13,6 +13,7 @@
 | HTTP | Reqwest | Provider 传输与真实网络工具的实现依赖，不进入 Core 公共接口；旧 exec 路径仍待迁移 |
 | SSE | eventsource-stream + async-stream | Provider 内分帧并构造惰性模型流，Core 只消费语义事件 |
 | 结构化 JSON | serde_json | Core/Tools 表达工具 Schema 与参数，Provider 映射载荷；不等于已接入 Schema 验证器 |
+| 工作区目录访问 | cap-std + cap-fs-ext | Tools 持有目录句柄，逐级不跟随符号链接；不是整个进程的 OS 沙箱 |
 | 日志 | tracing + tracing-subscriber + tracing-appender | CLI 初始化一次文件 subscriber，其余 crate 发事件；不向 TUI 屏幕输出 |
 | 会话格式 | JSONL 事件日志 | 便于追加、审计与异常退出恢复 |
 | 工具协议 | JSON Schema、stdio MCP | 所有带副作用的调用统一经过权限策略 |
@@ -68,9 +69,19 @@ Core 使用 `futures-util` 的通用 Stream 接口，不依赖 HTTP/SSE 类型�
 
 Core 定义 Tool trait 与注册表，只依赖通用 Future/JSON 类型；vortex-tools 通过 workspace
 依赖 Core、Serde、serde_json、Reqwest、Tokio 和 tracing，CLI 依赖具体实现进行注册。
-Tokio 的 `time` feature 用于搜索超时。Mock 搜索不发网络请求；秘塔搜索使用 Reqwest
+Tokio 的 `time` feature 用于搜索超时。目录工具另启用 `rt` 和 `sync`，分别用于
+`spawn_blocking` 与后台并发额度；不能把异步等待取消等同于终止阻塞 I/O。
+Mock 搜索不发网络请求；秘塔搜索使用 Reqwest
 直接调用网页检索 API，厂商请求与响应 DTO 留在具体 Tool 实现层，不进入 Core 公共接口。
-搜索契约见 [Agent loop 与搜索工具](../design/agent-loop.md)，候选比较见 [调研](../research/web-search-research.md)。
+工具契约见 [Agent loop 与内置工具](../design/agent-loop.md)，搜索候选比较见 [调研](../research/web-search-research.md)。
+
+Workspace 声明 `cap-std = "4.0.3"`、
+`cap-fs-ext = { version = "4.0.3", features = ["std"] }`，Tools 通过 workspace 引用，
+实际版本由根 Cargo.lock 固定。前者保存已打开的工作区目录，后者提供
+`DirExt::open_dir_nofollow`，按单个组件打开子目录而不是先检查绝对路径再重开。
+CLI 从启动 cwd 打开根并注入，Tools 不自行寻找项目根或用户 HOME。tempfile 仅作
+Tools 的 dev-dependency；目录工具不依赖 Shell 或尚未实现的 sandbox crate。
+此边界不保证树快照、硬 I/O 超时或完整 Windows 重解析点隔离，也不替代未来审批与进程沙箱。
 
 CLI 初始化非阻塞 JSON 文件日志，WorkerGuard 保持到 main 结束；日志路径为
 `<vortex-home>/logs/vortex.log`，HOME 来自统一路径解析。RUST_LOG 与 verbose 的实际优先级、

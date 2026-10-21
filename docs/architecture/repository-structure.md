@@ -32,13 +32,16 @@ vortex/
 | --- | --- |
 | vortex-core | `config.rs` 配置合并/校验、`model.rs` 模型目录/绑定、`conversation.rs` 历史、`provider.rs`/`tool.rs` 接口、`agent_loop.rs` 多步执行、`session.rs` actor |
 | vortex-provider | `openai_chat/mod.rs` 装配、`request.rs` 请求映射、`decoder.rs` 增量组装、`stream.rs` 流连接；`sse_transport.rs` 负责传输 |
-| vortex-tools | `metaso_web_search.rs` 及子模块负责秘塔 HTTP 与请求/结果映射；`mock_web_search.rs` 保留固定结果学习用途 |
+| vortex-tools | `list_directory.rs` 提供有界单层列表，`workspace_fs.rs` 管理工作区句柄与相对路径规则；`metaso_web_search.rs` 及子模块负责秘塔 HTTP 与请求/结果映射，`mock_web_search.rs` 保留固定结果学习用途 |
 | vortex-cli | `main.rs` 参数/模式、`paths.rs` 目录、`logging.rs` 日志、`bootstrap.rs` 加载/工具装配、`model_factory.rs` 模型装配；`exec.rs` 仍为旧单次路径 |
 | vortex-tui | `event_loop.rs` 与 `app.rs` 消费 CoreEvent，`command.rs` 解析 slash，`widgets/model_picker.rs` 等控件渲染局部状态 |
 
 历史、执行与 wire 请求之间的边界见 [Session](../design/session-runtime.md) 和
 [Agent loop](../design/agent-loop.md)；配置与模型切换的接入及测试边界见根 README，权限等
 后续目标不能仅凭目录存在视为已实现。
+
+CLI 从启动 cwd 打开并注入目录访问句柄；Tools 不依赖终端，也不在每次调用时重新寻找根。
+工作区句柄辅助模块只承载当前目录工具需要的边界，不预建读写文件或 Bash 框架。
 
 ## Workspace 约定
 

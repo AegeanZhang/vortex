@@ -13,7 +13,7 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 - [`engineering/coding-style.md`](engineering/coding-style.md) —— Rust 格式与命名约定。
 - [`engineering/testing.md`](engineering/testing.md) —— 测试组织和提交前检查命令。
-- [`engineering/regression-test-plan.md`](engineering/regression-test-plan.md) —— Fake/受控流、本地 HTTP 与搜索工具的回归测试步骤；区分待补覆盖和真实验证。
+- [`engineering/regression-test-plan.md`](engineering/regression-test-plan.md) —— Fake/受控流、本地 HTTP、搜索与目录工具的回归测试方法；区分待补覆盖和真实验证。
 - [`engineering/code-cleanup.md`](engineering/code-cleanup.md) —— 旧实现注释、占位模板的清理方法，以及仍应保留的执行链路。
 - [`engineering/git-workflow.md`](engineering/git-workflow.md) —— Commit、分支与 Pull Request 约定。
 - [`engineering/review-checklist.md`](engineering/review-checklist.md) —— Review 时检查架构、正确性与安全性的清单。
@@ -56,7 +56,7 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：理解流式 Provider、增加思考显示或验证流中断与退出时。
 
-- [`design/agent-loop.md`](design/agent-loop.md) —— 工具版 v1 的 Tool/Registry、模型与工具循环、历史回填、ID/轮数限制、秘塔与 Mock 搜索及测试契约。
+- [`design/agent-loop.md`](design/agent-loop.md) —— 工具版 v1 的 Tool/Registry、历史回填、ID/轮数限制、秘塔/Mock 搜索、工作区目录列表与阻塞取消边界及测试契约。
 
   **什么时候查**：阅读 run_turn、接入真实工具，或补充工具调用与多步失败测试时。
 

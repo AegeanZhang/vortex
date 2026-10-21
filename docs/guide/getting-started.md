@@ -1,8 +1,9 @@
 # 上手指南
 
-本文说明 Vortex 的构建、运行入口。产品 TUI 使用文本 SSE、工具循环与秘塔网页搜索，
+本文说明 Vortex 的构建、运行入口。产品 TUI 使用文本 SSE、工具循环、目录列表与秘塔网页搜索，
 此前搜索正常路径已由作者人工跑通。本轮分层配置与模型选择已接入源码并通过编译/Review，
-思考选项已补离线配置/装配测试，其他配置与切换专项测试、真实交互验收仍待补充；
+思考选项、目录工具及相关装配/模型能力判断已补离线测试；
+完整配置与切换矩阵、真实交互验收仍待补充；
 以下配置用法描述当前代码，不表示新链路已人工跑通。
 完整验证边界以根 README 为准。其他命令和后续能力的
 目标形态见 [`../design/cli-surface.md`](../design/cli-surface.md)，不要把设计文档中的
@@ -101,7 +102,8 @@ request_timeout_secs = 20
 
 Provider 定义连接、接口方言和密钥变量名；模型 profile 定义服务端名称、能力和请求选项。可按相同
 结构添加多个 profile，再用 `-m` 或 `/model` 选择其 ID，不直接输入服务端模型名。
-`supports_tools` 是用户声明而非远端探测；启用搜索时所选模型必须声明支持工具调用。
+`supports_tools` 是用户声明而非远端探测。当前 TUI 始终注册目录工具，即使关闭搜索，
+所选模型也必须声明 `supports_tools=true`；不兼容 profile 在 `/model` 列表中标为不可选。
 `thinking.mode` 缺省为 `provider-default`，省略参数而不是关闭思考；当前文本阶段仍拒绝
 思考增量。显式 disabled 要求 can_disable=true，并与接口方言匹配。DeepSeek 官方与
 百炼托管接入的参数不同，不能仅按模型名称配置；完整示例与旧字段迁移见
@@ -134,6 +136,8 @@ cargo run -p vortex-cli --locked -- -c 'search.enabled=true' -c 'search.backend=
 # 使用秘塔时才生效；search.enabled 仍须为 true，且需要搜索 key。
 cargo run -p vortex-cli --locked -- -c 'search.max_results=3'
 ```
+
+关闭搜索只移除 `web_search`，`list_directory` 仍可用；不是完全无工具模式。
 
 `-c` 只允许 `default_model`、`search.enabled/backend/max_results/connect_timeout_secs/request_timeout_secs`，
 值按 TOML 解析；字符串要带 TOML 双引号，例如 `-c 'default_model="qwen-max"'`。
@@ -206,7 +210,41 @@ RUST_LOG=info,vortex_tools=debug cargo run -p vortex-cli --locked
 详细接口见 [Agent loop](../design/agent-loop.md)。正常路径已跑通，无需反复验证同一个
 成功请求；建议保留一份不含认证信息的响应样例，后续补空结果与异常契约测试。
 
-现有 exec 未迁移到流式 Session/配置/搜索链路，不要求秘塔 key，收到 `-m/-c` 明确返回
+### 目录列表工具
+
+TUI 默认注册 `list_directory`，不需要额外文件系统配置或搜索凭据。根目录固定为启动
+cwd，不是 Git 根、Cargo manifest 目录或 Vortex HOME；切换启动目录会改变它能查看的范围。
+工具只列直接子项，不读正文、不写文件、不执行 Shell，也不递归或分页。
+
+参数形状示例：
+
+```json
+{"path":".","limit":100}
+```
+
+路径必须相对根目录，用 `/` 分隔；也可指定 `crates/vortex-tools/src`。`limit` 默认 100、
+最大 200。绝对路径、`..`、任意层符号链接及部分不便携名称被拒绝；`.git`、`.vortex`、
+`.env` 和 `.env.*` 隐藏且禁止访问，其他隐藏项不一律排除，不读取 `.gitignore`。
+
+返回值包含相对 `path`、子项 `name/type`、`truncated` 和 `truncation_reasons`。
+最多扫描 4096 项，最终 JSON 最多 16 KiB；截断意味着列表不完整，重复调用不保证获得
+下一页。优先缩小到明确子目录，逐层探索仍受每 Turn 四次工具调用预算限制。
+TUI 不直接显示文件树或原始工具 JSON，模型接收结果后生成回答。
+
+离线用例已验证目录工具与装配，真实模型/TUI 目录往返仍待人工验收。例如，在自己明确
+选择的测试目录启动后输入：`请调用 list_directory，列出当前目录的直接子项，不读取文件。`
+仅凭模型声称“已列出”不能证明工具执行，应核对实际调用与回填链路。
+
+只读也有外发风险：文件名、目录名与工具结果会发送给当前模型供应商；固定隐藏规则不是
+完整秘密检测器。只在自己明确选择的目录运行，不开启正文 TRACE 来分享真实目录数据。
+工具尚无审批系统、进程沙箱或硬 I/O 超时，已开始的阻塞读取不会因 `/exit` 强制终止，
+挂起的网络盘可能拖延退出。Linux 离线测试不代表 Windows junction 等边界已验收。
+完整契约见 [Agent loop 与内置工具](../design/agent-loop.md)。
+
+### 旧单次模式的边界
+
+现有 exec 未迁移到流式 Session/配置/工具链路，不提供该目录工具，不要求秘塔 key，
+收到 `-m/-c` 明确返回
 非零错误；不传时仍走旧执行路径，也不使用本节清单验收。完整命令目标
 （exec 模式、`vortex resume`、审批与沙箱参数、输出契约、退出码）记录在
 [`../design/cli-surface.md`](../design/cli-surface.md)，不可把其中所有参数视为已经实现。

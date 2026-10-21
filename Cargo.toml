@@ -15,6 +15,8 @@ vortex-tools = { path = "crates/vortex-tools" }
 vortex-tui = { path = "crates/vortex-tui" }
 
 async-stream = "0.3.6"
+cap-std = "4.0.3"
+cap-fs-ext = { version = "4.0.3", features = ["std"] }
 clap = { version = "4.6.6", features = ["derive"] }
 crossterm = { version = "0.29", default-features = false }
 eventsource-stream = "0.2.3"

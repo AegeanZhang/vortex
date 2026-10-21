@@ -4,33 +4,40 @@ use vortex_core::{
     Tool, ToolRegistry,
     config::{AppConfig, SearchBackend},
 };
-use vortex_tools::{MetasoSearchOptions, MetasoWebSearch, MockWebSearch};
+use vortex_tools::{
+    ListDirectoryTool, MetasoSearchOptions, MetasoWebSearch, MockWebSearch, WorkspaceFs,
+};
 
 use crate::model_factory::{CredentialError, read_api_key};
 
-fn build_tools(config: &AppConfig) -> Result<ToolRegistry, Box<dyn Error + Send + Sync>> {
-    build_tools_with_key_reader(config, read_api_key)
+fn build_tools(
+    config: &AppConfig,
+    workspace: WorkspaceFs,
+) -> Result<ToolRegistry, Box<dyn Error + Send + Sync>> {
+    build_tools_with_key_reader(config, workspace, read_api_key)
 }
 
 fn build_tools_with_key_reader(
     config: &AppConfig,
+    workspace: WorkspaceFs,
     read_key: impl Fn(&str) -> Result<String, CredentialError>,
 ) -> Result<ToolRegistry, Box<dyn Error + Send + Sync>> {
-    if !config.search.enabled {
-        return Ok(ToolRegistry::empty());
+    let mut tools: Vec<Arc<dyn Tool>> = vec![Arc::new(ListDirectoryTool::new(workspace))];
+    if config.search.enabled {
+        let search: Arc<dyn Tool> = match config.search.backend {
+            SearchBackend::Mock => Arc::new(MockWebSearch::new()),
+            SearchBackend::Metaso => Arc::new(MetasoWebSearch::new_with_options(
+                read_key(&config.search.api_key_env)?,
+                MetasoSearchOptions {
+                    max_results: config.search.max_results,
+                    connect_timeout: Duration::from_secs(config.search.connect_timeout_secs),
+                    request_timeout: Duration::from_secs(config.search.request_timeout_secs),
+                },
+            )?),
+        };
+        tools.push(search);
     }
-    let tool: Arc<dyn Tool> = match config.search.backend {
-        SearchBackend::Mock => Arc::new(MockWebSearch::new()),
-        SearchBackend::Metaso => Arc::new(MetasoWebSearch::new_with_options(
-            read_key(&config.search.api_key_env)?,
-            MetasoSearchOptions {
-                max_results: config.search.max_results,
-                connect_timeout: Duration::from_secs(config.search.connect_timeout_secs),
-                request_timeout: Duration::from_secs(config.search.request_timeout_secs),
-            },
-        )?),
-    };
-    Ok(ToolRegistry::new(vec![tool])?)
+    Ok(ToolRegistry::new(tools)?)
 }
 
 pub(crate) async fn start_tui_session(
@@ -55,14 +62,18 @@ pub(crate) async fn start_tui_session(
     report_config_sources(paths, &loaded.sources);
     let config = loaded.config;
 
-    let tools = build_tools(&config)?;
+    let workspace_root = paths.cwd.clone();
+    let workspace =
+        tokio::task::spawn_blocking(move || WorkspaceFs::open(workspace_root)).await??;
+    let tools = build_tools(&config, workspace)?;
+    let requires_tools = !tools.specs().is_empty();
     let initial = config.default_model.clone();
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .retry(reqwest::retry::never())
         .build()
         .map_err(|_| std::io::Error::other("模型 HTTP 客户端初始化失败"))?;
-    let factory = Arc::new(ConfiguredModelFactory::new(config, client)?);
+    let factory = Arc::new(ConfiguredModelFactory::new(config, client, requires_tools)?);
     let models = ModelManager::new(factory, &initial)?;
     let selected = models.current();
     eprintln!(
@@ -103,4 +114,67 @@ fn report_config_sources(
         project_config = %sources.project.path.display(), project_config_status = sources.project.status.as_str(),
         "configuration sources resolved",
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn search_disabled_still_registers_directory_without_reading_search_key() {
+        let root = tempdir().unwrap();
+        let mut config = AppConfig::default();
+        config.search.enabled = false;
+        let registry =
+            build_tools_with_key_reader(&config, WorkspaceFs::open(root.path()).unwrap(), |_| {
+                panic!("disabled search must not read a key")
+            })
+            .unwrap();
+        let names: Vec<_> = registry.specs().into_iter().map(|spec| spec.name).collect();
+        assert_eq!(names, ["list_directory"]);
+    }
+
+    #[tokio::test]
+    async fn mock_search_preserves_stable_tool_order_without_reading_key() {
+        let root = tempdir().unwrap();
+        let mut config = AppConfig::default();
+        config.search.backend = SearchBackend::Mock;
+        let registry =
+            build_tools_with_key_reader(&config, WorkspaceFs::open(root.path()).unwrap(), |_| {
+                panic!("mock search must not read a key")
+            })
+            .unwrap();
+        let names: Vec<_> = registry.specs().into_iter().map(|spec| spec.name).collect();
+        assert_eq!(names, ["list_directory", "web_search"]);
+    }
+
+    #[tokio::test]
+    async fn metaso_assembly_reads_only_its_configured_key_without_sending_request() {
+        let root = tempdir().unwrap();
+        let config = AppConfig::default();
+        let reads = Mutex::new(Vec::new());
+        let registry =
+            build_tools_with_key_reader(&config, WorkspaceFs::open(root.path()).unwrap(), |name| {
+                reads.lock().unwrap().push(name.to_owned());
+                Ok("fixture-key-not-a-real-secret".into())
+            })
+            .unwrap();
+        assert_eq!(*reads.lock().unwrap(), vec![config.search.api_key_env]);
+        assert_eq!(registry.specs().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn enabled_search_does_not_silently_fall_back_when_its_key_is_missing() {
+        let root = tempdir().unwrap();
+        let config = AppConfig::default();
+        let error =
+            build_tools_with_key_reader(&config, WorkspaceFs::open(root.path()).unwrap(), |_| {
+                Err(CredentialError("fixture credential missing".into()))
+            })
+            .err()
+            .unwrap();
+        assert_eq!(error.to_string(), "fixture credential missing");
+    }
 }

@@ -2,11 +2,12 @@
 
 Vortex 是一个使用 Rust 编写、以学习实现细节为目的的终端 Agent，目标体验类似 Codex CLI 和 Claude Code：理解自然语言任务，在用户控制下读取工作区、调用工具、执行命令并持续完成任务。
 
-> 当前状态：TUI 已接入文本 SSE、工具闭环与秘塔网页搜索。一个 Turn 可经历多次模型请求与
+> 当前状态：TUI 已接入文本 SSE、工具闭环、工作区单层目录列表与秘塔网页搜索。一个 Turn 可经历多次模型请求与
 > 工具执行，Provider 组装完整 ToolCall，Core 回填工具结果，TUI 流式展示 Assistant Markdown。
 > TUI 已接入分层 TOML、模型 profile 与 `/model` 会话内切换，搜索可关闭或选择秘塔/Mock。
-> 默认 `web_search` 调用秘塔独立搜索 API，再由当前模型生成回答；作者此前已反馈搜索正常
-> 路径可运行。新配置/切换链路已通过编译与代码 Review，思考选项已补离线测试，其他专项与真实交互验收仍待补充。
+> 默认注册 `list_directory`，再按搜索配置选装秘塔/Mock 的 `web_search`；关闭搜索不会关闭
+> 目录工具。作者此前已反馈秘塔正常路径可运行；目录工具、装配与模型能力约束已补离线
+> 测试，真实模型目录往返及其他专项验收仍待补充。
 
 Transcript 已接入 Assistant Markdown、键盘翻页与鼠标滚轮；相关回归测试仍需补充，
 滑块视觉断裂问题暂缓处理。当前处于文本 SSE 阶段 A，默认 Qwen profile 显式关闭思考及思考历史；
@@ -27,9 +28,14 @@ Resize 主动重绘，按键 Release 与确认键 Repeat 已过滤；Paste、动
 工具版 v1 每个模型步骤只接受一个调用，一个 Turn 最多执行 4 次工具调用；第五次会失败。
 工具错误作为 `is_error = true` 的结果回填给模型，空白或重复调用 ID 则直接使 Turn 失败。
 TUI 仅用状态栏展示工具开始/完成，不显示工具卡片或来源引用。设计见
-[`Agent loop 与搜索工具`](docs/design/agent-loop.md)。秘塔工具已实现参数校验、超时和
+[`Agent loop 与内置工具`](docs/design/agent-loop.md)。秘塔工具已实现参数校验、超时和
 响应/输出大小限制，但注册表尚无通用 Schema 校验、工具超时或预算治理。
 Thinking 内容展示/回传、会话恢复、网页正文读取、MCP 和沙箱仍未实现。
+
+`list_directory` 只列启动 cwd 内指定目录的直接子项，不执行 Shell、不读正文、不写文件。
+相对路径访问逐级拒绝符号链接，隐藏 `.git`、`.vortex`、`.env` 与 `.env.*`；条数、扫描量
+与 JSON 输出有独立上限。没有递归、分页或硬 I/O 超时；后台阻塞读取无法被 Shutdown
+强制终止，不等于完整文件系统沙箱。目录名与文件名会随工具结果发送给当前模型供应商。
 
 验证边界（2026-10-01）：产品测试共 15 个并通过（含 1 个沙箱占位测试），release 构建通过。
 Core 的 7 个测试覆盖无工具文本流的增量顺序、
@@ -76,6 +82,17 @@ Slash 补充验证（2026-10-13）：本次执行 `cargo check --workspace --all
 本轮未调用真实 API、读取真实凭据或进行终端交互验收。参数被远端接受、确实关闭思考、
 正文与工具往返仍待作者验证；未补齐完整配置文件/路径、HTTP/SSE、工具循环及 TUI 模型切换矩阵。
 
+目录工具补充验证（2026-10-21）：新增 23 项离线测试，覆盖路径/链接拒绝、隐藏规则、
+非递归与中文名称、扫描/条数/JSON 字节截断、注册表错误转换、取消等待后后台额度保持，以及
+搜索装配、按需凭据与模型 tools 能力不匹配时保留旧绑定。
+本次执行 `cargo fmt --all -- --check`、
+`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` 和
+`cargo test --workspace --all-features --locked --quiet` 均通过；单元测试共 93 项
+（CLI 14、Core 12、Provider 10、Tools 16、TUI 40、沙箱占位 1）。
+本次未运行 release 构建或真实模型/终端验收；没有读取真实凭据或调用付费 API。
+目录工具的 Windows 边界、并发目录替换、内核 I/O 硬超时及完整工具循环/HTTP/SSE
+专项覆盖仍不能由这些测试推断为已完成。
+
 ## 首版方向
 
 - Linux 优先，提供交互式 TUI；同时规划 `vortex exec "<task>"` 单次执行模式。
@@ -107,7 +124,7 @@ crates/                    # 产品 crate
 ├── vortex-core/           # 配置、模型管理、Session/Agent loop 与 Provider/Tool 接口
 ├── vortex-provider/       # OpenAI-compatible Provider 适配
 ├── vortex-tui/            # 交互界面、状态更新与渲染
-├── vortex-tools/          # 秘塔网页搜索实现，保留 MockWebSearch
+├── vortex-tools/          # 工作区目录列表与秘塔网页搜索，保留 MockWebSearch
 └── vortex-sandbox/        # 沙箱层占位 crate
 ```
 
@@ -125,11 +142,14 @@ Provider profile 定义连接、接口方言与密钥变量名，模型 profile 
 thinking.mode 支持 provider-default（省略参数，不等于关闭）或 disabled；后者要求声明
 关闭能力且方言能够表达。详见 [思考选项设计](docs/design/provider-thinking-options.md)。
 只读取选中模型的 key；搜索关闭或 Mock 不读搜索 key，秘塔缺 key 不回退 Mock。
+搜索开关仅控制 `web_search`，目录工具始终注册，没有新增 files 配置；当前 TUI 即使
+关闭搜索也要求所选模型声明支持工具调用。模型列表与创建入口使用实际注册表的同一能力要求。
 默认模型/搜索分别使用 `QWEN_API_KEY`、`METASO_API_KEY`；密钥值只允许通过环境变量
 提供，不写入仓库或 TOML。`-m/-c` 当前只接入 TUI，旧 exec 收到它们明确失败。
 配置不自动生成或写回，没有订阅登录、热重载或完整 workspace trust。
-搜索查询会发送给秘塔，工具结果再回填当前模型，两个服务可能分别计费，
-不要把密钥或私有仓库内容放进查询。非交互模式遇到需要审批的操作时应安全失败，除非
+搜索查询会发送给秘塔，工具结果再回填当前模型，两个服务可能分别计费；目录列表也会
+发送给当前模型供应商，只读不等于没有外发风险。不要把密钥或私有仓库内容放进查询。
+非交互模式遇到需要审批的操作时应安全失败，除非
 用户显式选择相应权限策略。配置示例与边界见 [配置设计](docs/design/configuration.md)。
 
 ## 常用命令
@@ -161,7 +181,7 @@ TRACE；这只解决已知日志点，不代表所有日志/错误路径已完�
 
 1. 初始化 Rust 2024 Cargo workspace，完成 Provider 抽象、Session 事件接口和非流式 TUI v1。（已完成）
 2. 补齐文本 SSE、Mock 工具循环、Provider 转换和 TUI 工具状态测试，完成真实终端验收。
-3. 秘塔真实搜索已接入，正常路径已由作者人工跑通；补齐异常与边界回归，再扩展其他内置工具及通用校验、超时和预算治理；独立推进 Thinking、重绘节流和 Turn 取消。
+3. 秘塔真实搜索与单层目录列表已接入，搜索正常路径已由作者人工跑通，目录工具已补离线测试；继续真实目录往返与搜索异常验收，再扩展其他内置工具及通用校验、超时和预算治理；独立推进 Thinking、重绘节流和 Turn 取消。
 4. 模型/搜索 TOML 配置与 `/model` 首版已接入，旧菜单回归已适配；思考选项装配及离线测试已完成，继续补其他配置/切换专项和真实交互验收。
 5. 实现 JSONL 会话恢复、`bubblewrap` 沙箱和 stdio MCP client，并将 exec 迁移到共享 Session。
 6. 完善安装、CI、发布包、可观测性与跨平台抽象。

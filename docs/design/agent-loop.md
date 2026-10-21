@@ -1,4 +1,4 @@
-# Agent loop 与搜索工具设计
+# Agent loop 与内置工具设计
 
 本文描述工具版 v1 的执行契约。运行时所有权见 [Session](session-runtime.md)，流式协议见
 [SSE](streaming-response.md)，完整上下文构建目标见 [Message](message-building.md)。
@@ -18,11 +18,14 @@ v1 串行执行：每个模型步骤最多一个 ToolCall，每个 Turn 最多�
 | `vortex-provider/src/openai_chat/` | 请求映射、SSE 工具增量组装；不执行工具 |
 | `vortex-tools/src/mock_web_search.rs` | 固定搜索结果，用于验证执行路径 |
 | `vortex-tools/src/metaso_web_search.rs` 及子模块 | 秘塔 HTTP 搜索、请求/响应映射与工具内边界限制 |
+| `vortex-tools/src/list_directory.rs`、`workspace_fs.rs` | 有界目录列表、工作区句柄与相对路径访问规则 |
 | `vortex-cli/src/main.rs`、`bootstrap.rs`、`model_factory.rs` | 解析参数，加载配置并按需装配具体 Provider/Tool；TUI 不认识它们 |
 
-Mock v1 是最初的闭环基线；当前 bootstrap 按配置关闭搜索或注册秘塔/Mock，默认秘塔，
-复用同一执行契约，不接入 Tavily。关闭搜索时传 ToolRegistry::empty()；整个 Session
-的工具目录固定，模型切换不重新装配工具。开启搜索时选择的模型须声明支持工具调用。
+Mock v1 是最初的闭环基线；当前 bootstrap 总是先注册 `list_directory`，再按配置选装
+秘塔/Mock 的 `web_search`，默认秘塔，不接入 Tavily。关闭搜索不等于空注册表，也不关闭
+目录工具。整个 Session 的工具目录固定，模型切换不重新装配工具；CLI 从实际注册表计算
+`requires_tools`，统一用于模型列表的不可用原因与实例创建前校验。当前 TUI 始终有目录
+工具，因此即使关闭搜索，所选模型仍须声明支持工具调用。
 仍不实现并行工具、审批、沙箱、通用 JSON Schema 校验、注册表统一超时或总 Token 预算。
 秘塔工具单独实现参数校验、请求超时与输出限制；不能把这些推断为所有 Tool 都已受治理。
 
@@ -62,6 +65,60 @@ pub trait Tool: Send + Sync {
 工具；`specs()` 按注册顺序返回定义；`execute(&ToolCall)` 按名字查找并执行。
 未知工具、参数错误和执行错误统一转换为保留原 `call_id` 的错误 ToolResult，不直接结束
 Turn。工具只处理参数，不负责生成调用 ID；注册表不自动执行 Schema 校验。
+
+### 目录列表（list_directory v1）
+
+CLI 在进入 TUI 前，通过 `spawn_blocking` 将启动时 `AppPaths.cwd` 打开为 `WorkspaceFs`，
+并注入 `ListDirectoryTool`。根目录固定，不向父目录查找 Git 根，不使用 Vortex HOME；
+模型不能提供新的根。工具不执行 `ls` 或 Shell，只列直接子项，不读正文、不写文件。
+
+输入、输出示例：
+
+```json
+{"path":"crates/vortex-tools/src","limit":100}
+```
+
+```json
+{
+  "path":"crates/vortex-tools/src",
+  "entries":[{"name":"lib.rs","type":"file"}],
+  "truncated":false,
+  "truncation_reasons":[]
+}
+```
+
+输出仅为形状示例，不代表该目录实际只有一个文件。具体约束如下：
+
+- `path` 必填，1～4096 UTF-8 字节，最多 32 个普通组件；`.` 表示根，`a/./b` 规范化为
+  `a/b`。保留名称内空格，不 trim、不展开环境变量或通配符。拒绝绝对路径、`..`、控制
+  字符、反斜杠、冒号和组件末尾的空格/点号；部分 Linux 合法文件名因此不受支持。
+- `limit` 为可选整数，默认 100，允许 1～200；拒绝未知字段，包括 recursive/root。
+  Schema 用于模型声明，实际校验由 Serde 与工具内路径规则执行。
+- `.git`、`.vortex`、`.env`、`.env.*` 按 ASCII 大小写不敏感规则隐藏且禁止访问，包括
+  `.env.example`；其他隐藏项不一律排除，不解析 `.gitignore`。
+- 从已打开的 `cap_std::fs::Dir` 句柄逐个组件调用 `open_dir_nofollow`；路径任意一层为
+  符号链接均拒绝。父目录列表可展示 `symlink` 类型，但不返回或读取其目标。
+- 子项类型为 `directory/file/symlink/other`；不返回绝对路径、正文、大小或 mtime。
+  名称须为可表示的 UTF-8，最多 1024 字节并满足名称规则；不支持的项跳过并标记截断，
+  不使用有损名称重新访问路径。
+- 最多扫描 4096 个原始条目，额外观察一项判断是否溢出；隐藏/跳过项也占扫描额度。
+  对已扫描的有效项按名称排序，再按 limit 裁剪；最终序列化 JSON 最多 16 KiB，超预算
+  移除末尾项后重新序列化，不截断 JSON 字节。无分页、递归或准确的全目录总数。
+- `truncation_reasons` 去重列出 `scan_limit/entry_limit/output_limit/unsupported_name`。
+  固定隐藏项本身不算截断。扫描受限时只排序已扫描部分，不承诺全目录字典序前 N 项，
+  重复调用也不保证取得下一页。
+- 空目录成功；不存在、无权限、不是目录、枚举或类型读取失败返回 ToolError，由注册表
+  回填错误 ToolResult，不伪装成空列表。错误只包含静态上下文与 ErrorKind，不透传宿主路径。
+
+打开子目录、枚举、排序与序列化放在 `spawn_blocking`；单实例 Semaphore 只允许一个后台
+操作，忙时立即返回错误，不无限排队。permit 移入阻塞闭包，因此超时或取消等待不会提前
+释放额度；已开始的阻塞操作无法被 async abort 强制停止。没有硬 I/O 超时，挂起的网络盘
+仍可能拖延 runtime 退出；不能由扫描预算推断时长有界。
+
+模型可多轮逐层查看子目录，仍共享每 Turn 四次工具调用预算。目录名与文件名是不可信数据，
+也可能包含私密信息，会随 ToolResult 发给当前模型供应商；固定隐藏规则不等于秘密检测。
+该句柄边界不是审批系统、进程沙箱或目录快照；其他进程仍可修改/重命名目录。Linux 为
+当前验证平台，Windows junction/reparse point 与挂载边界需另行验收。
 
 ### Mock 搜索（保留的闭环基线）
 
@@ -184,7 +241,7 @@ TUI 在 ToolCallStarted/ToolCallFinished 时只更新 notice 并重绘，Session
 
 ## 测试契约与后续接入
 
-以下是待覆盖的契约，不是通过记录：
+以下是测试契约与待补范围，不是整体验证通过记录；已补覆盖和实际结果见根 README：
 
 - FakeProvider 依次给出调用和最终回答：第二次请求含正确的调用/结果，事件顺序稳定。
 - 工具错误仍回填并再次调用模型；未知工具、重名工具、参数错误分别可观测。
@@ -194,6 +251,10 @@ TUI 在 ToolCallStarted/ToolCallFinished 时只更新 notice 并重绘，Session
 - TUI 工具事件不新增 Transcript entry、不改变 Running 状态，完成/失败后清除 notice。
 - 搜索 disabled/Mock 不读取 key；秘塔请求 size 保持 JSON 字符串，后端多返回也遵守配置
   条数；非法选项被构造器拒绝，配置无法放宽响应/输出硬预算。
+- 目录工具使用 TempDir，覆盖路径/链接拒绝、隐藏规则、非递归列表、扫描/条数/字节截断、
+  JSON 转义、错误回填及取消后仍持有后台额度；不依赖用户仓库或真实凭据。
+- bootstrap 保持目录工具优先的稳定顺序，搜索关闭仍注册目录；模型目录与 create 根据
+  同一工具能力要求拒绝不兼容模型，且先于模型凭据读取。失败切换保留旧模型与实例。
 
 测试使用受控 fake 和本地 fixture，不访问付费 API。秘塔已通过替换 CLI 注册的 Tool
 接入；后续服务适配仍应在 Tools 内转换请求/结果，不在 Agent loop 中加入厂商字段。
