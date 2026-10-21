@@ -139,7 +139,6 @@ async fn publish_event(
     }
 }
 
-//pub fn start_session(provider: Arc<dyn ModelProvider>, tools: ToolRegistry) -> SessionConnection {
 pub fn start_session(mut models: ModelManager, tools: ToolRegistry) -> SessionConnection {
     info!("Session runtime starting");
 

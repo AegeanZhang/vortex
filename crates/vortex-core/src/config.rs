@@ -9,16 +9,6 @@ pub enum ProviderKind {
     OpenaiChat,
 }
 
-/*
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum RequestOptions {
-    #[default]
-    Plain,
-    QwenStageA,
-}
-*/
-
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ApiFlavor {
@@ -244,11 +234,6 @@ impl AppConfig {
     }
 
     pub fn apply_project(&mut self, patch: ProjectConfigPatch) -> Result<(), ConfigError> {
-        /*if let Some(id) = &patch.default_model {
-            if !self.models.contains_key(id) {
-                return Err(ConfigError::Invalid("项目默认模型必须引用已有 profile"));
-            }
-        }*/
         if let Some(id) = &patch.default_model
             && !self.models.contains_key(id)
         {

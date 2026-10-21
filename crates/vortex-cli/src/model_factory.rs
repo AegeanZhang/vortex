@@ -139,7 +139,6 @@ impl ModelFactory for ConfiguredModelFactory {
             .get(&model.provider)
             .ok_or_else(|| fail("模型引用的 Provider 不存在".into()))?;
 
-        //let key = (self.read_key)(&profile.api_key_env).map_err(|error| fail(error.0))?;
         let provider = match profile.kind {
             ProviderKind::OpenaiChat => {
                 let options = chat_options(

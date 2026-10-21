@@ -126,12 +126,6 @@ pub(super) struct ChatRequest {
     model: String,
     messages: Vec<ChatMessage>,
     stream: bool,
-    /*
-    #[serde(skip_serializing_if = "Option::is_none")]
-    enable_thinking: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    preserve_thinking: Option<bool>,
-    */
     #[serde(flatten)]
     thinking_fields: ThinkingRequestFields,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -142,7 +136,6 @@ impl ChatRequest {
     pub(super) fn from_model_request(
         model: String,
         model_request: ModelRequest,
-        //thinking: Option<QwenThinkingOptions>,
         thinking_fields: ThinkingRequestFields,
     ) -> Self {
         let ModelRequest { items, tools } = model_request;
@@ -152,8 +145,6 @@ impl ChatRequest {
             messages: map_messages(items),
             tools: tools.into_iter().map(map_tool_spec).collect(),
             stream: true,
-            //enable_thinking: thinking.map(|options| options.enabled),
-            //preserve_thinking: thinking.map(|options| options.preserve_history),
             thinking_fields,
         }
     }

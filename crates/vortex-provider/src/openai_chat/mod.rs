@@ -18,14 +18,6 @@ impl std::fmt::Debug for SecretString {
     }
 }
 
-/*
-#[derive(Debug, Clone, Copy)]
-pub struct QwenThinkingOptions {
-    pub enabled: bool,
-    pub preserve_history: bool,
-}
-*/
-
 pub struct OpenAiChatProvider {
     client: reqwest::Client,
     base_url: String,
@@ -59,13 +51,6 @@ impl OpenAiChatProvider {
             thinking_fields: ThinkingRequestFields::default(),
         }
     }
-
-    /*
-    pub fn with_qwen_thinking(mut self, options: QwenThinkingOptions) -> Self {
-        self.qwen_thinking = Some(options);
-        self
-    }
-    */
 
     pub fn with_options(mut self, options: OpenAiChatOptions) -> Result<Self, RequestOptionsError> {
         self.thinking_fields = options.into_request_fields()?;
