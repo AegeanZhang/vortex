@@ -9,6 +9,10 @@
 
   - [Claude Code 历史快照核对](web-search-research.md#历史源码快照核对2026-10-21)（2026-10-21）：云端 WebSearch 的辅助模型请求、本地 Grep/Glob 与 ripgrep、特殊内嵌工具分支、源码入口和隐私/证据边界。
 
+## Agent 评测
+
+- [`agent-evaluation-benchmarks-research.md`](agent-evaluation-benchmarks-research.md) —— SWE-bench/Pro/V2 的任务与判分、行业采用证据及 Verified 的争议；区分模型与 Codex CLI/Claude Code 产品成绩，对比 Terminal-Bench、BFCL、搜索/安全等候选，给出 Vortex 分阶段评测与数据管理建议。
+
 ## TUI 与内容展示
 
 - [`rust-tui-research.md`](rust-tui-research.md) —— Rust TUI 技术栈与 Ratatui、Crossterm、Tokio 选型。
