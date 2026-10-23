@@ -3,10 +3,11 @@
 - 调研日期：2026-09-27
 - 补充调研：2026-10-02，新增秘塔 AI 搜索、中国大陆直连条件、当前 Qwen 的模型侧搜索、DeepSeek V4 Pro 搜索实测，以及 Codex/Claude Code/DeepSeek Harness/WorkBuddy 的多模型搜索设计；除明确补充的内容外，价格与额度仍为原调研基线
 - 接入反馈：2026-10-05，作者反馈编译后的程序已成功执行秘塔搜索；证据边界见 §5.5
+- 源码补充：2026-10-21，只读核对用户提供的 Claude Code 历史快照，区分云端 WebSearch 与本地 Grep/Glob；未运行快照或调用真实搜索，见 §3.4 的快照核对
 - 范围：Agent Web Search 的执行形态、国内外服务候选、可靠性与安全边界
 - 定位：保留实现前调研与候选建议；后续接入状态单独注明，以设计文档和根 README 为准
 - 关联设计：[`Message 与上下文构建`](../design/message-building.md)、[`Session Runtime`](../design/session-runtime.md)
-- 后续执行契约：[`Agent loop 与搜索工具`](../design/agent-loop.md)
+- 后续执行契约：[`Agent loop 与内置工具`](../design/agent-loop.md)
 - 关联架构：[`架构总览`](../architecture/overview.md)、[`关键依赖与技术选型`](../architecture/technology-stack.md)
 
 本文保留 2026-09-27 调研时的基线与候选建议，“当前一次 Prompt 对应一次模型流”等描述
@@ -43,6 +44,7 @@
 本节于 2026-10-02 补充官方资料与源码核对；没有运行这些产品、切换用户配置、安装客户端
 或执行新的付费搜索。本地 Codex 基线仍为 `5bf132cd527311eb61bbec46562e3890eb49df80`
 （2026-09-16）；Harness 为查询时官方文档及公开 `master` 源码，不是固定发行版验收。
+§3.4 的历史快照核对于 2026-10-21 另行补充，不代表重新验证本节其他产品或最新平台能力。
 
 ### 3.1 先区分“本地”的两种含义
 
@@ -124,6 +126,70 @@ Agent Platform 的适用 Claude 模型支持；Amazon Bedrock 不暴露该服务
 Desktop 的 **Code tab** 与 CLI 使用同一底层引擎。当前 Desktop 文档提供第三方平台/
 网关部署入口，但不是任意个人 Key 都有相同 GUI 与功能的保证；也不能把 Code tab 的
 结论直接套到 Chat/Cowork。[桌面功能与部署边界][claude-desktop]
+
+#### 历史源码快照核对（2026-10-21）
+
+证据来自用户指定的本地源码快照。用户说明它是 2026 年 3 月流出版本，快照随附 README
+自述公开暴露日期为 2026-03-31；真实性、完整性和授权未独立核实，不视为官方开源仓库
+或最新实现。本轮只读源码，不安装依赖、不执行快照、不调用真实 API，也不复制实现代码。
+本机绝对路径只保留在未入库的 `AGENTS.local.md`；下表路径相对于包含 `src/` 的快照根目录。
+
+**结论：网页搜索由云端执行，本地文件搜索主要调用本机成熟搜索工具。** “搜索发生在
+哪里”与“结果是否会发送给模型”需要分别判断。
+
+| 能力 | 执行位置 | 快照中的常规实现 |
+| --- | --- | --- |
+| `WebSearch` | 模型服务端 | CLI 另发一次携带服务端搜索工具定义的模型 API 请求 |
+| `Grep` | 本地 | 将正则、范围、上下文和输出模式转换为 ripgrep 参数 |
+| `Glob` | 本地 | 通过 ripgrep 的 `--files --glob` 查找文件路径 |
+
+WebSearch 的调用链并非 CLI 直接请求 Google、Brave 或 Tavily：
+
+1. 外层主模型选择调用 `WebSearch`，CLI 构造只包含搜索查询的辅助用户消息。
+2. `makeToolSchema()` 生成 `web_search_20250305` 定义，携带域名过滤与 `max_uses=8`。
+   `call()` 通过 `queryModelWithStreaming()` 另发辅助请求，将定义放入 `extraToolSchemas`；
+   普通客户端工具列表为空，不等于 API 请求没有工具，传输层会合并额外的服务端工具定义。
+3. 未开启对应 feature flag 时使用主循环模型；开启后选择小模型并要求使用 `web_search`，
+   不能据此推断所有部署都固定使用同一个搜索模型。
+4. 云端返回 `server_tool_use`、查询参数增量、`web_search_tool_result` 与文本等内容块。
+   CLI 跟踪查询和结果数量以展示进度，再归一化标题、URL 和文字。
+5. `mapToolResultToToolResultBlockParam()` 将结果封装为外层调用对应的 `tool_result`，
+   回填主会话，并提示最终回答附来源链接。
+
+这是“客户端 Tool 封装服务端搜索”的组合，而不是本地检索网页或本机浏览器自动化。
+客户端可确认服务端搜索协议，但无法据此识别云端最终使用的搜索引擎、索引供应商或全部
+数据来源；该内置入口也未展示独立搜索 API 的自动回退路径。
+
+快照的 `isEnabled()` 对 firstParty、Foundry 返回启用，对 Vertex 检查指定 Claude 4
+模型名，其余返回禁用。这只是当时的客户端分支，不是今日平台支持表，也不是服务端能力
+探测。替换 API 地址或 Key 后仍须由目标端点实现所发搜索协议；不能由工具显示为可用
+推断远端实际支持，更不能用旧快照否定前文较晚的 DeepSeek 接入证据。
+
+Grep/Glob 则在本机执行搜索。Grep 构造 rg 参数数组，经 `ripGrep()` 调用；Glob 使用
+`--files --glob`，再整理路径与截断信息。ripgrep 可能来自系统安装、随包 vendor 文件，
+或原生程序内嵌版本；常规调用使用 `spawn` / `execFile`，不是任意字符串拼接的 Shell 命令。
+复用搜索引擎不代表可省略权限、忽略规则、取消、进程生命周期和输出大小治理。
+
+另有特殊构建分支：`hasEmbeddedSearchTools()` 为真时移除独立 Grep/Glob，在 Bash 环境
+注入调用内嵌 bfs/ugrep 的 find/grep 包装。这仍是本地搜索，不应把 ripgrep 描述为所有
+构建、所有搜索入口的唯一实现。是否实际启用，仍需检查具体构建与运行条件。
+
+可复核的源码入口如下，行号仅对应本次读取的快照：
+
+| 入口 | 核对位置 |
+| --- | --- |
+| 服务端搜索定义与启用条件 | `src/tools/WebSearchTool/WebSearchTool.ts:76`、`:168` |
+| 辅助请求、流式结果与外层回填 | `src/tools/WebSearchTool/WebSearchTool.ts:254`、`:299`、`:401` |
+| 合并额外工具定义与调用 Messages API | `src/services/api/claude.ts:1385`、`:1822` |
+| Grep 参数与本机搜索调用 | `src/tools/GrepTool/GrepTool.ts:310`、`:441` |
+| Glob 工具入口与 rg 文件枚举 | `src/tools/GlobTool/GlobTool.ts:160`、`src/utils/glob.ts:91` |
+| ripgrep 来源与进程启动 | `src/utils/ripgrep.ts:31`、`:135`、`:217` |
+| 特殊构建的搜索入口替换 | `src/tools.ts:193`、`src/utils/embeddedTools.ts:15`、`src/utils/bash/ShellSnapshot.ts:153` |
+
+本地搜索不等于离线 Agent：匹配内容和文件名仍会转成工具结果，后续发送给所用模型服务。
+对 Vortex 可借鉴的是将 `web_search`、文件路径匹配和文件内容搜索分成独立 Tool；模型
+决定调用意图，Tool 决定执行位置与访问边界。当前 `list_directory` 只列一层，不等同于
+Glob 或 Grep；本节不自动授权接入新工具，也不改变 Vortex 已选用秘塔独立搜索 API 的方案。
 
 ### 3.5 DeepSeek Harness：模型与搜索后端独立，最值得参考的抽象
 
