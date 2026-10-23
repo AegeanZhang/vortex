@@ -4,6 +4,7 @@
 
 ## Agent 与外部能力
 
+- [`agent-loop-research.md`](agent-loop-research.md) —— Codex 与 Claude Code 历史快照的 Agent loop 对照；2026-10-22 补充 ReAct、Prompt/上下文装配、Plan–Execute 工程编排与 Plan Schema，区分模型决策和程序强制规则。
 - [`web-search-research.md`](web-search-research.md) —— 国内外搜索候选、网络与费用边界；2026-10-02 补充 Qwen 模型侧搜索、DeepSeek V4 Pro 五次 API 实验，以及 Codex/Claude Code/DeepSeek Harness/WorkBuddy 的 CLI/桌面搜索设计与自定义模型边界；2026-10-05 记录秘塔正常搜索的作者反馈与后续验证边界。
 
 ## TUI 与内容展示
