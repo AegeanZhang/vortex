@@ -153,7 +153,7 @@ impl ChatRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::openai_chat::{OpenAiChatDialect, OpenAiChatOptions};
+    use crate::openai_chat::{OpenAiChatDialect, OpenAiChatOptions, ReasoningHistoryPolicy};
     use serde_json::{Value, json};
     use vortex_core::{
         SessionMessage, ThinkingCapabilities, ThinkingMode, ThinkingOptions, ToolResult,
@@ -165,11 +165,13 @@ mod tests {
     ) -> ThinkingRequestFields {
         OpenAiChatOptions {
             dialect,
+            history_policy: ReasoningHistoryPolicy::Unverified,
             thinking: ThinkingOptions {
                 mode: ThinkingMode::Disabled,
             },
             thinking_capabilities: ThinkingCapabilities {
                 can_disable: true,
+                can_enable: false,
                 supports_history_control,
             },
         }
@@ -196,6 +198,38 @@ mod tests {
                 "model": "fixture-model",
                 "messages": [{"role": "user", "content": "fixture prompt"}],
                 "stream": true,
+            })
+        );
+    }
+
+    #[test]
+    fn enabled_request_serializes_thinking_fields_at_the_top_level() {
+        let request = ChatRequest::from_model_request(
+            "fixture-model".into(),
+            ModelRequest {
+                items: vec![],
+                tools: vec![],
+            },
+            OpenAiChatOptions {
+                dialect: OpenAiChatDialect::DashScope,
+                history_policy: ReasoningHistoryPolicy::DisplayOnlyWithHistoryDisabled,
+                thinking: ThinkingOptions {
+                    mode: ThinkingMode::Enabled,
+                },
+                thinking_capabilities: ThinkingCapabilities {
+                    can_enable: true,
+                    can_disable: true,
+                    supports_history_control: true,
+                },
+            }
+            .into_request_fields()
+            .unwrap(),
+        );
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            json!({
+                "model": "fixture-model", "messages": [], "stream": true,
+                "enable_thinking": true, "preserve_thinking": false,
             })
         );
     }

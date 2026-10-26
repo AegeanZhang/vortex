@@ -86,7 +86,7 @@ ToolRegistry 单独验证稳定的 specs 注册顺序、重名拒绝和 empty �
 以及无工具时的序列化形状。Decoder 测试喂完整 SSE data；分帧测试从 HTTP bytes 开始，
 两者不可相互替代。
 
-- 内容增量、统计空 choices、注释/心跳、同包正文与思考；阶段 A 的 Core 仍拒绝思考。
+- 内容增量、统计空 choices、注释/心跳、同包正文与思考；Reject 策略拒绝思考，DisplayOnly 独立转发。
 - 工具名称/参数跨包拼接，首次非空 ID、后续空 ID、相同 ID、不同非空 ID、坏参数 JSON。
 - `finish_reason` 与 `[DONE]` 的顺序、缺 DONE、缺结束原因、重复终态、终态后正文。
 - 非成功 HTTP、错误 Content-Type、坏 JSON/API 错误、body 中断与空闲超时。
@@ -135,10 +135,10 @@ HTTP 200 内业务错误和真实可空字段应依据脱敏真实样例确认�
 DTO。2026-10-02 临时实施稿记录过独立临时 crate 的 19 个示例测试及其 Clippy 检查通过，
 它们不是产品测试通过记录，也不能证明真实 API 契约、网络可达性或额度消耗。
 
-## 6. TUI 与后续 Thinking
+## 6. TUI 与 Thinking
 
 阶段 A 验证增量追加、完成清理、失败片段保留、CommandRejected 不误删活跃 Assistant；
-工具事件仅更新 notice，不新增 Transcript entry、不提前将 Running 改为 Idle。
+工具事件更新 notice 与 UI 阶段，不新增 Transcript entry、不提前将 Running 改为 Idle。
 TestBackend 覆盖 Markdown 围栏跨 Delta、布局、Unicode 测高及手动滚动不跳回尾部。
 
 模型窗口补 Snapshot 初始化、确认前不换标签、成功/拒绝、pending 防重复、Esc 后新草稿
@@ -146,8 +146,10 @@ TestBackend 覆盖 Markdown 围栏跨 Delta、布局、Unicode 测高及手动�
 测试从实际菜单矩形计算内容行，不保留旧固定行号。旧菜单回归已适配，专项缺口和
 实际验证记录见根 README；不能据此认为模型窗口与 pending 链路已被充分覆盖。
 
-阶段 B 实施后再添加思考/正文分离、晚到思考不回退回答状态、只有思考时失败保留、
-最终帧刷新与节流测试。阶段 C 再测试第二轮独立思考回传、User/System 无思考字段、
+当前展示-only 阶段已有思考/正文分离、纯文本与 Markdown、步骤分离、晚到思考不回退、
+只有思考时失败保留、长中文滚动/resize 与极小窗口回归。新增测试与旧 slash 回归一同运行，
+不能由此推断整个模型窗口矩阵已覆盖。跨事件节流及其最终帧测试仍待实现；
+阶段 C 再测试第二轮独立思考回传、User/System 无思考字段、
 Snapshot 保留与模型能力限制。不得为了提前通过这些目标测试添加占位成功逻辑。
 
 强制重绘与休眠恢复另见 [终端画面恢复](../design/terminal-redraw-recovery.md)；
@@ -182,6 +184,11 @@ cargo test -p vortex-tui --locked
 测试使用固定 TOML 与注入 KeyReader，不读取真实用户文件或调用网络。以下完整文件型
 加载、路径、Session/TUI 切换矩阵仍需另补，不能以这批测试代替整条链路验收。
 
+Thinking 预设与展示已追加离线覆盖：None/false 区分、预设与方言拒绝、历史契约、
+Enabled JSON、非法闲置 profile 与凭据读取、builder 消费策略替换；Core/Session 覆盖
+步骤事件、思考字节上限、工具预算、请求历史不含思考及取消背压。真实服务与 HTTP
+字节分帧仍单独验收，测试数量和执行结果只记录在根 README。
+
 ### 路径、日志与来源诊断
 
 - 在 `crates/vortex-cli/src/paths.rs` 的模块内测试中直接调用 `AppPaths::from_inputs`，
@@ -211,8 +218,9 @@ HOME 或 `.env`。覆盖：
   仍有目录工具，不能借此允许不支持 tools 的模型。Core 配置校验与 CLI 按实际注册表
   判断的能力约束分别覆盖，不能掩盖非法 Provider 定义、越界搜索参数或坏文件。
 - 未知 Provider kind、未知配置字段、非法 ID/URL/引用/显示名、数量/超时边界失败。
-- 模型级思考策略与能力独立；旧 request_options、未知方言、enabled 和未知能力字段必须拒绝；
-  整条替换后省略的策略/能力回到缺省。这部分已有纯解析与合并测试，文件型加载另补。
+- 模型级思考策略、预设与能力覆盖独立；旧 request_options、未知方言/策略/能力字段必须拒绝。
+  Enabled 可以解析，适用性由工厂/Provider 校验；无历史契约或不支持的方言仍不可用。
+  整条替换后省略的策略/预设/覆盖回到缺省。这部分已有纯解析与合并测试，文件型加载另补。
 - `api_key="test-secret"` 等误配置失败，错误 Display/Debug 不含标记密钥或 TOML 原文。
 
 以下是仍适用的最小文件型示例，追加到 config.rs 的 tests；已有模块只合并内容。

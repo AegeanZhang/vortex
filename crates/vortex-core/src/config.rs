@@ -1,7 +1,7 @@
 use serde::{Deserialize, de::DeserializeOwned};
 use std::{collections::BTreeMap, fmt, path::PathBuf};
 
-use crate::{ThinkingCapabilities, ThinkingOptions};
+use crate::{ThinkingCapabilitiesOverride, ThinkingOptions};
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -39,7 +39,9 @@ pub struct ModelConfig {
     #[serde(default)]
     pub thinking: ThinkingOptions,
     #[serde(default)]
-    pub thinking_capabilities: ThinkingCapabilities,
+    pub thinking_preset: Option<String>,
+    #[serde(default)]
+    pub thinking_capabilities: ThinkingCapabilitiesOverride,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -186,10 +188,12 @@ impl Default for AppConfig {
                     thinking: ThinkingOptions {
                         mode: crate::ThinkingMode::Disabled,
                     },
-                    thinking_capabilities: ThinkingCapabilities {
+                    thinking_preset: Some("dashscope-qwen-display-only".into()),
+                    /*thinking_capabilities: ThinkingCapabilities {
                         can_disable: true,
                         supports_history_control: true,
-                    },
+                    },*/
+                    thinking_capabilities: ThinkingCapabilitiesOverride::default(),
                 },
             )]),
             search: SearchConfig {
@@ -304,6 +308,13 @@ impl AppConfig {
                 return Err(ConfigError::Invalid(
                     "模型 ID 不合法或引用了不存在的 Provider",
                 ));
+            }
+            if model
+                .thinking_preset
+                .as_deref()
+                .is_some_and(|id| !valid_profile_id(id))
+            {
+                return Err(ConfigError::Invalid("思考预设 ID 不合法"));
             }
             if model.model.is_empty()
                 || model.model.len() > 128
@@ -536,17 +547,17 @@ mod tests {
     #[test]
     fn builtin_qwen_explicitly_disables_thinking() {
         let config = AppConfig::default();
+        let model = &config.models["qwen-max"];
+
         assert_eq!(config.providers["qwen"].api_flavor, ApiFlavor::Dashscope);
+        assert_eq!(model.thinking.mode, ThinkingMode::Disabled);
         assert_eq!(
-            config.models["qwen-max"].thinking.mode,
-            ThinkingMode::Disabled
+            model.thinking_preset.as_deref(),
+            Some("dashscope-qwen-display-only"),
         );
         assert_eq!(
-            config.models["qwen-max"].thinking_capabilities,
-            ThinkingCapabilities {
-                can_disable: true,
-                supports_history_control: true,
-            }
+            model.thinking_capabilities,
+            ThinkingCapabilitiesOverride::default(),
         );
     }
 
@@ -603,11 +614,14 @@ supports_history_control = false
         );
         assert_eq!(patch.models["hosted"].thinking.mode, ThinkingMode::Disabled);
         for id in ["fixture", "hosted"] {
-            assert!(patch.models[id].thinking_capabilities.can_disable);
-            assert!(
-                !patch.models[id]
-                    .thinking_capabilities
-                    .supports_history_control
+            let model = &patch.models[id];
+
+            assert_eq!(model.thinking_preset, None);
+            assert_eq!(model.thinking_capabilities.can_enable, None);
+            assert_eq!(model.thinking_capabilities.can_disable, Some(true),);
+            assert_eq!(
+                model.thinking_capabilities.supports_history_control,
+                Some(false),
             );
         }
     }
@@ -636,20 +650,20 @@ supports_tools = true
             config.models["qwen-max"].thinking.mode,
             ThinkingMode::ProviderDefault
         );
+
+        let model = &config.models["qwen-max"];
+        assert_eq!(model.thinking_preset, None);
         assert_eq!(
-            config.models["qwen-max"].thinking_capabilities,
-            ThinkingCapabilities::default()
+            model.thinking_capabilities,
+            ThinkingCapabilitiesOverride::default()
         );
-        assert!(!config.models["qwen-max"].thinking_capabilities.can_disable);
-        assert!(
-            !config.models["qwen-max"]
-                .thinking_capabilities
-                .supports_history_control
-        );
+        assert_eq!(model.thinking_capabilities.can_enable, None);
+        assert_eq!(model.thinking_capabilities.can_disable, None);
+        assert_eq!(model.thinking_capabilities.supports_history_control, None,);
     }
 
     #[test]
-    fn rejects_old_fields_enabled_mode_and_unknown_options() {
+    fn rejects_old_fields_and_unknown_options() {
         let model = r#"
 [models.fixture]
 provider = "qwen"
@@ -662,7 +676,7 @@ supports_tools = true
             assert!(toml::from_str::<UserConfigPatch>(&text).is_err());
         }
         for extra in [
-            "[models.fixture.thinking]\nmode = \"enabled\"",
+            "[models.fixture.thinking]\nmode = \"unknown\"",
             "[models.fixture.thinking]\nmode = \"disabled\"\nunknown = true",
             "[models.fixture.thinking_capabilities]\ncan_disable = \"true\"",
             "[models.fixture.thinking_capabilities]\ncan_disable = true\nunknown = true",
@@ -686,6 +700,32 @@ api_key_env = "FIXTURE_KEY"
     }
 
     #[test]
+    fn parses_enabled_mode_without_declaring_capabilities() {
+        let patch: UserConfigPatch = toml::from_str(
+            r#"
+[models.fixture]
+provider = "qwen"
+model = "fixture-model"
+display_name = "Fixture"
+supports_tools = true
+
+[models.fixture.thinking]
+mode = "enabled"
+"#,
+        )
+        .unwrap();
+
+        let model = &patch.models["fixture"];
+
+        assert_eq!(model.thinking.mode, ThinkingMode::Enabled);
+        assert_eq!(model.thinking_preset, None);
+        assert_eq!(
+            model.thinking_capabilities,
+            ThinkingCapabilitiesOverride::default(),
+        );
+    }
+
+    #[test]
     fn project_and_cli_cannot_override_thinking_definitions() {
         for text in [
             "[providers.qwen]\napi_flavor = \"dashscope\"",
@@ -702,5 +742,104 @@ api_key_env = "FIXTURE_KEY"
         ] {
             assert!(config.apply_override(value).is_err());
         }
+    }
+
+    #[test]
+    fn validates_preset_id_shape_but_defers_preset_existence_to_factory() {
+        for id in [
+            String::new(),
+            "x".repeat(65),
+            "preset\nname".into(),
+            "preset\0name".into(),
+        ] {
+            let mut config = AppConfig::default();
+            config.models.get_mut("qwen-max").unwrap().thinking_preset = Some(id);
+            assert!(matches!(
+                config.validate_definitions(),
+                Err(ConfigError::Invalid("思考预设 ID 不合法"))
+            ));
+        }
+        let mut config = AppConfig::default();
+        config.models.get_mut("qwen-max").unwrap().thinking_preset = Some("unknown-preset".into());
+        config.validate_definitions().unwrap();
+    }
+
+    #[test]
+    fn parses_explicit_preset_and_boolean_capability_overrides() {
+        let model: ModelConfig = toml::from_str(
+            r#"
+provider = "qwen"
+model = "fixture-model"
+display_name = "Fixture"
+supports_tools = true
+thinking_preset = "dashscope-qwen-display-only"
+[thinking]
+mode = "enabled"
+[thinking_capabilities]
+can_enable = false
+can_disable = true
+supports_history_control = false
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            model.thinking_preset.as_deref(),
+            Some("dashscope-qwen-display-only")
+        );
+        assert_eq!(model.thinking.mode, ThinkingMode::Enabled);
+        assert_eq!(
+            model.thinking_capabilities,
+            ThinkingCapabilitiesOverride {
+                can_enable: Some(false),
+                can_disable: Some(true),
+                supports_history_control: Some(false),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_capability_types_and_user_supplied_history_policy() {
+        let base = "provider = \"qwen\"\nmodel = \"fixture-model\"\ndisplay_name = \"Fixture\"\nsupports_tools = true\n";
+        for field in ["can_enable", "can_disable", "supports_history_control"] {
+            for value in ["\"true\"", "1", "[]"] {
+                assert!(
+                    toml::from_str::<ModelConfig>(&format!(
+                        "{base}[thinking_capabilities]\n{field} = {value}"
+                    ))
+                    .is_err()
+                );
+            }
+        }
+        for extra in [
+            "history_policy = \"display-only-with-history-disabled\"",
+            "[thinking_capabilities]\nhistory_policy = \"display-only-with-history-disabled\"",
+            "[thinking_capabilities]\nenable_thinking = true",
+        ] {
+            assert!(toml::from_str::<ModelConfig>(&format!("{base}{extra}")).is_err());
+        }
+    }
+
+    #[test]
+    fn project_and_cli_cannot_supply_presets_capabilities_or_history_contracts() {
+        for text in [
+            "[models.qwen-max]\nthinking_preset = \"dashscope-qwen-display-only\"",
+            "[models.qwen-max.thinking_capabilities]\ncan_enable = true",
+            "[models.qwen-max]\nhistory_policy = \"display-only-with-history-disabled\"",
+            "thinking_preset = \"dashscope-qwen-display-only\"",
+        ] {
+            assert!(toml::from_str::<ProjectConfigPatch>(text).is_err());
+        }
+        let mut config = AppConfig::default();
+        for value in [
+            "models.qwen-max.thinking_preset=\"dashscope-qwen-display-only\"",
+            "models.qwen-max.thinking_capabilities.can_enable=true",
+            "models.qwen-max.history_policy=\"display-only-with-history-disabled\"",
+        ] {
+            assert!(config.apply_override(value).is_err());
+        }
+        assert_eq!(
+            config.models["qwen-max"].thinking.mode,
+            ThinkingMode::Disabled
+        );
     }
 }

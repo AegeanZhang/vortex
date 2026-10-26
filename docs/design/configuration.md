@@ -2,6 +2,10 @@
 
 本文定义已接入的模型与搜索配置首版契约，是实施稿的依据；运行目录见 [安装设计](installation.md)，密钥处理见 [凭据设计](credentials.md)。CLI/Core/TUI 已接通 TOML、默认用户 HOME、`-m/-c` 与 `/model`。思考选项的配置、装配和请求 JSON 已补离线测试；完整配置优先级、路径与 TUI 切换专项及真实交互验收仍未完成，验证结果以根 README 为准。下文验收要求不是通过记录。
 
+Thinking 预设、可选覆盖及显式 Enabled 的配置已接入；当前仅开放指定 DashScope Qwen
+展示-only 接入，DeepSeek 开启思考尚未适配。用法见第 3 节，消费与历史边界见
+[Thinking 展示设计](thinking-display.md)。
+
 ## 1. 目标与职责
 
 用户应能在不同项目复用 Provider/模型定义，按项目收紧搜索行为，并通过启动参数或 `/model` 选择模型，而不必修改源码。
@@ -33,7 +37,7 @@
 
 - 不同 Provider/模型 ID 合并；同 ID 的条目整条替换，不逐字段拼接旧连接或旧请求选项。
 - 用户/项目搜索设置只覆盖显式出现的字段；`false` 是有效值，不是缺省。
-- Provider 未写 `api_flavor` 时为 `generic`；模型未写 `thinking` 时为 `provider-default`，两个思考能力均默认为 false。整条替换后不继承旧策略或能力。
+- Provider 未写 `api_flavor` 时为 `generic`；模型未写 `thinking` 时为 `provider-default`，未写预设为 None、能力覆盖逐字段为 None。运行时从全 false 基线解析预设与覆盖；整条替换不继承旧策略、预设或能力。
 - 首版内置 Qwen 模型与秘塔默认搜索以兼容现有 TUI。添加其他模型不删除内置条目，不读取未选中模型的密钥。
 - 配置在启动时读取一次；编辑文件需重启，不影响已经运行的 Session。
 
@@ -55,13 +59,10 @@ provider = "qwen"
 model = "qwen3.8-max"
 display_name = "Qwen Max"
 supports_tools = true
+thinking_preset = "dashscope-qwen-display-only"
 
 [models.qwen-max.thinking]
 mode = "disabled"
-
-[models.qwen-max.thinking_capabilities]
-can_disable = true
-supports_history_control = true
 
 [search]
 enabled = true
@@ -80,6 +81,54 @@ CLI 将方言、策略和能力装配为 `OpenAiChatOptions`，Provider 校验�
 `request_options` 旧字段已拒绝，新字段与迁移规则见 [思考选项装配设计](provider-thinking-options.md)。
 
 `openai-chat` 明确表示 Chat Completions 协议，并使用现有 SSE/工具调用语义。仅支持 Responses 或 Anthropic Messages 的服务不能仅靠改地址接入；不支持的 kind 明确报错。
+
+### Thinking 预设与高级覆盖
+
+普通用户在完整模型条目中选择能力预设并设置策略，不必填写能力布尔值。例如在已有
+providers.qwen 连接下新增独立模型：
+
+```toml
+[models.qwen-thinking]
+provider = "qwen"
+model = "qwen3.8-max"
+display_name = "Qwen Thinking"
+supports_tools = true
+thinking_preset = "dashscope-qwen-display-only"
+
+[models.qwen-thinking.thinking]
+mode = "enabled"
+```
+
+该预设仅针对指定百炼 Qwen 候选接入，三个能力均为 true，并提供独立的展示-only
+历史适用契约；不按型号或域名自动匹配，也不是远端验收记录。
+api_flavor 仍须显式选对，不由预设修改；model、URL、key 和 mode 同样不由预设生成。
+
+高级用户可以在同一模型条目下声明覆盖，例如：
+
+```toml
+[models.qwen-thinking.thinking_capabilities]
+can_enable = false
+```
+
+此值明确覆盖预设的 true，因此本例 Enabled 会被标记不可用，不静默降级。
+输入类型为 ThinkingCapabilitiesOverride，三个字段均为 Option<bool>：None 不覆盖、
+Some(false) 覆盖 true；最终运行时能力仍为 bool。无预设时从全 false 开始应用覆盖，
+旧 can_disable / supports_history_control 布尔 TOML 仍兼容。
+
+模型新增 thinking_preset 为可选字符串，形式复用 profile ID 规则；Provider 检查已知 ID
+和方言。未知预设不回退，无效闲置模型在目录标记不可用；create 在读取 key 之前拒绝。
+同 ID 整条替换后不继承原预设或覆盖，只有显式选中的预设与当前条目覆盖逐字段合并。
+内置默认模型使用预设，但保持 Disabled 和原请求 JSON。
+
+能力覆盖不接受 history_policy，也不能使尚未适配的接入支持展示。即使三个 bool 全 true，
+无独立历史契约的 Enabled 仍拒绝；supports_history_control 不证明工具步骤可省略回传。
+项目文件和 -c 白名单不增加预设、能力或历史字段。完整契约见
+[Provider 选项第 8 节](provider-thinking-options.md#8-能力预设与覆盖)。
+
+保存后重启，并用 `-m qwen-thinking` 或 `/model qwen-thinking` 选择该 profile；新增条目
+不会自动改变 default_model。界面中思考以纯文本单独显示，正文仍按 Markdown 渲染。
+ProviderDefault 不发送控制参数，但当前输出策略仍为 Reject，不能用它绕过 Enabled
+校验。远端参数接受情况与真实工具往返的验收边界见根 README。
 
 ### 搜索配置
 
@@ -106,8 +155,9 @@ CLI 将方言、策略和能力装配为 `OpenAiChatOptions`，Provider 校验�
 | display_name | 非空、最多 80 字符，无控制字符 |
 | Provider 引用 | 必须引用已定义条目 |
 | api_flavor | Provider 字段，`generic`（缺省）、`dashscope` 或 `deepseek` |
-| thinking.mode | 模型字段，`provider-default`（缺省）或 `disabled`；不接受 enabled |
-| thinking_capabilities | 模型字段，can_disable、supports_history_control 均为布尔值，缺省 false |
+| thinking.mode | `provider-default`（缺省）、`disabled`、`enabled`；Enabled 须通过适配器与历史契约校验 |
+| thinking_preset | 可选模型字段，形式同 profile ID；当前仅识别 `dashscope-qwen-display-only`，并要求 dashscope 方言 |
+| thinking_capabilities | 可选 can_enable、can_disable、supports_history_control 布尔覆盖；省略不覆盖，显式 false 覆盖预设 true |
 | 搜索数量/超时 | 1–5 条、连接 1–30 秒、总请求 1–120 秒；连接超时不大于总超时 |
 | 配置体积/数量 | 每文件最多 64 KiB，Provider 最多 16 个，模型最多 64 个且非空 |
 

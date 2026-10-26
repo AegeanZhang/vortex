@@ -13,8 +13,16 @@ pub enum OpenAiChatDialect {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ReasoningHistoryPolicy {
+    #[default]
+    Unverified,
+    DisplayOnlyWithHistoryDisabled,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct OpenAiChatOptions {
     pub dialect: OpenAiChatDialect,
+    pub history_policy: ReasoningHistoryPolicy,
     pub thinking: ThinkingOptions,
     pub thinking_capabilities: ThinkingCapabilities,
 }
@@ -22,6 +30,19 @@ pub struct OpenAiChatOptions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestOptionsError {
     ThinkingDisableNotDeclared {
+        dialect: OpenAiChatDialect,
+    },
+    ThinkingEnableNotDeclared {
+        dialect: OpenAiChatDialect,
+    },
+    DisplayOnlyHistoryUnsupported {
+        dialect: OpenAiChatDialect,
+    },
+    DisplayOnlyHistoryUnverified {
+        dialect: OpenAiChatDialect,
+    },
+    UnknownThinkingPreset,
+    ThinkingPresetDialectMismatch {
         dialect: OpenAiChatDialect,
     },
     UnsupportedThinkingMode {
@@ -40,6 +61,22 @@ impl fmt::Display for RequestOptionsError {
                 formatter,
                 "当前模型未声明支持在接口方言 {dialect:?} 下关闭思考",
             ),
+            Self::ThinkingEnableNotDeclared { dialect } => write!(
+                formatter,
+                "当前模型未声明支持在接口方言 {dialect:?} 下开启思考",
+            ),
+            Self::DisplayOnlyHistoryUnsupported { dialect } => write!(
+                formatter,
+                "接口方言 {dialect:?} 的展示-only 模型要求声明支持关闭思考历史",
+            ),
+            Self::DisplayOnlyHistoryUnverified { dialect } => write!(
+                formatter,
+                "接口方言 {dialect:?} 的当前接入未声明展示-only 历史契约",
+            ),
+            Self::UnknownThinkingPreset => formatter.write_str("未知思考能力预设"),
+            Self::ThinkingPresetDialectMismatch { dialect } => {
+                write!(formatter, "思考能力预设与接口方言 {dialect:?} 不匹配",)
+            }
             Self::UnsupportedThinkingMode { dialect, mode } => {
                 write!(formatter, "接口方言 {dialect:?} 不支持思考策略 {mode:?}",)
             }
@@ -83,43 +120,72 @@ impl OpenAiChatOptions {
 
     pub(super) fn into_request_fields(self) -> Result<ThinkingRequestFields, RequestOptionsError> {
         match self.thinking.mode {
-            ThinkingMode::ProviderDefault => return Ok(ThinkingRequestFields::default()),
-            ThinkingMode::Disabled => {}
-        }
-
-        if !self.thinking_capabilities.can_disable {
-            return Err(RequestOptionsError::ThinkingDisableNotDeclared {
-                dialect: self.dialect,
-            });
-        }
-
-        match self.dialect {
-            OpenAiChatDialect::DashScope => Ok(ThinkingRequestFields {
-                enable_thinking: Some(false),
-                preserve_thinking: self
-                    .thinking_capabilities
-                    .supports_history_control
-                    .then_some(false),
-                thinking: None,
-            }),
-            OpenAiChatDialect::DeepSeek => {
-                if self.thinking_capabilities.supports_history_control {
-                    return Err(RequestOptionsError::UnsupportedHistoryControl {
+            ThinkingMode::ProviderDefault => Ok(ThinkingRequestFields::default()),
+            ThinkingMode::Enabled => {
+                if self.dialect != OpenAiChatDialect::DashScope {
+                    return Err(RequestOptionsError::UnsupportedThinkingMode {
+                        dialect: self.dialect,
+                        mode: self.thinking.mode,
+                    });
+                }
+                if !self.thinking_capabilities.can_enable {
+                    return Err(RequestOptionsError::ThinkingEnableNotDeclared {
+                        dialect: self.dialect,
+                    });
+                }
+                if !self.thinking_capabilities.supports_history_control {
+                    return Err(RequestOptionsError::DisplayOnlyHistoryUnsupported {
+                        dialect: self.dialect,
+                    });
+                }
+                if self.history_policy != ReasoningHistoryPolicy::DisplayOnlyWithHistoryDisabled {
+                    return Err(RequestOptionsError::DisplayOnlyHistoryUnverified {
                         dialect: self.dialect,
                     });
                 }
                 Ok(ThinkingRequestFields {
-                    enable_thinking: None,
-                    preserve_thinking: None,
-                    thinking: Some(DeepSeekThinking {
-                        kind: DeepSeekThinkingType::Disabled,
-                    }),
+                    enable_thinking: Some(true),
+                    preserve_thinking: Some(false),
+                    thinking: None,
                 })
             }
-            OpenAiChatDialect::Generic => Err(RequestOptionsError::UnsupportedThinkingMode {
-                dialect: self.dialect,
-                mode: self.thinking.mode,
-            }),
+            ThinkingMode::Disabled => {
+                if !self.thinking_capabilities.can_disable {
+                    return Err(RequestOptionsError::ThinkingDisableNotDeclared {
+                        dialect: self.dialect,
+                    });
+                }
+                match self.dialect {
+                    OpenAiChatDialect::DashScope => Ok(ThinkingRequestFields {
+                        enable_thinking: Some(false),
+                        preserve_thinking: self
+                            .thinking_capabilities
+                            .supports_history_control
+                            .then_some(false),
+                        thinking: None,
+                    }),
+                    OpenAiChatDialect::DeepSeek => {
+                        if self.thinking_capabilities.supports_history_control {
+                            return Err(RequestOptionsError::UnsupportedHistoryControl {
+                                dialect: self.dialect,
+                            });
+                        }
+                        Ok(ThinkingRequestFields {
+                            enable_thinking: None,
+                            preserve_thinking: None,
+                            thinking: Some(DeepSeekThinking {
+                                kind: DeepSeekThinkingType::Disabled,
+                            }),
+                        })
+                    }
+                    OpenAiChatDialect::Generic => {
+                        Err(RequestOptionsError::UnsupportedThinkingMode {
+                            dialect: self.dialect,
+                            mode: self.thinking.mode,
+                        })
+                    }
+                }
+            }
         }
     }
 }
@@ -137,11 +203,87 @@ mod tests {
     ) -> OpenAiChatOptions {
         OpenAiChatOptions {
             dialect,
+            history_policy: ReasoningHistoryPolicy::Unverified,
             thinking: ThinkingOptions { mode },
             thinking_capabilities: ThinkingCapabilities {
                 can_disable,
+                can_enable: false,
                 supports_history_control,
             },
+        }
+    }
+
+    fn enabled_options() -> OpenAiChatOptions {
+        OpenAiChatOptions {
+            dialect: OpenAiChatDialect::DashScope,
+            history_policy: ReasoningHistoryPolicy::DisplayOnlyWithHistoryDisabled,
+            thinking: ThinkingOptions {
+                mode: ThinkingMode::Enabled,
+            },
+            thinking_capabilities: ThinkingCapabilities {
+                can_enable: true,
+                can_disable: true,
+                supports_history_control: true,
+            },
+        }
+    }
+
+    #[test]
+    fn dashscope_enabled_disables_reasoning_history() {
+        assert_eq!(
+            serde_json::to_value(enabled_options().into_request_fields().unwrap()).unwrap(),
+            json!({"enable_thinking": true, "preserve_thinking": false}),
+        );
+    }
+
+    #[test]
+    fn enabled_requires_enable_capability() {
+        let mut options = enabled_options();
+        options.thinking_capabilities.can_enable = false;
+        assert_eq!(
+            options.validate(),
+            Err(RequestOptionsError::ThinkingEnableNotDeclared {
+                dialect: OpenAiChatDialect::DashScope,
+            })
+        );
+    }
+
+    #[test]
+    fn enabled_requires_history_control() {
+        let mut options = enabled_options();
+        options.thinking_capabilities.supports_history_control = false;
+        assert_eq!(
+            options.validate(),
+            Err(RequestOptionsError::DisplayOnlyHistoryUnsupported {
+                dialect: OpenAiChatDialect::DashScope,
+            })
+        );
+    }
+
+    #[test]
+    fn enabled_requires_verified_history_contract_even_with_all_capabilities() {
+        let mut options = enabled_options();
+        options.history_policy = ReasoningHistoryPolicy::Unverified;
+        assert_eq!(
+            options.validate(),
+            Err(RequestOptionsError::DisplayOnlyHistoryUnverified {
+                dialect: OpenAiChatDialect::DashScope,
+            })
+        );
+    }
+
+    #[test]
+    fn enabled_rejects_other_dialects_even_with_all_capabilities() {
+        for dialect in [OpenAiChatDialect::Generic, OpenAiChatDialect::DeepSeek] {
+            let mut options = enabled_options();
+            options.dialect = dialect;
+            assert_eq!(
+                options.validate(),
+                Err(RequestOptionsError::UnsupportedThinkingMode {
+                    dialect,
+                    mode: ThinkingMode::Enabled,
+                })
+            );
         }
     }
 

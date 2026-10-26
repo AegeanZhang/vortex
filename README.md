@@ -9,10 +9,11 @@ Vortex 是一个使用 Rust 编写、以学习实现细节为目的的终端 Age
 > 目录工具。作者此前已反馈秘塔正常路径可运行；目录工具、装配与模型能力约束已补离线
 > 测试，真实模型目录往返及其他专项验收仍待补充。
 
-Transcript 已接入 Assistant Markdown、键盘翻页与鼠标滚轮；相关回归测试仍需补充，
-滑块视觉断裂问题暂缓处理。当前处于文本 SSE 阶段 A，默认 Qwen profile 显式关闭思考及思考历史；
-已支持按接口方言、模型策略与能力装配关闭参数，涵盖 DeepSeek 官方与百炼托管接入，未启用思考内容处理。
-阶段 B/C 的 Thinking 契约见 [`docs/design/streaming-response.md`](docs/design/streaming-response.md)。
+Transcript 已接入 Assistant Markdown、键盘翻页与鼠标滚轮；已补 Thinking 与正文混排、
+长中文滚动和窗口大小变化的离线回归，滑块视觉断裂问题暂缓处理。默认 Qwen profile
+仍显式关闭思考及思考历史；独立 Qwen Thinking profile 可通过显式预设开启展示-only
+思考，按模型步骤显示且不回填模型历史。DeepSeek 开启思考尚未接入。
+契约与限制见 [`Thinking 展示设计`](docs/design/thinking-display.md)。
 Shutdown 可通知 Session 中止活跃流，但尚无保留会话的 `CancelTurn`；exec 未迁移到流式链路。
 
 Slash 支持 `/exit`、`/model` 与 `/model <profile-id>`：草稿首字符为 `/` 时显示根命令菜单，
@@ -30,7 +31,7 @@ Resize 主动重绘，按键 Release 与确认键 Repeat 已过滤；Paste、动
 TUI 仅用状态栏展示工具开始/完成，不显示工具卡片或来源引用。设计见
 [`Agent loop 与内置工具`](docs/design/agent-loop.md)。秘塔工具已实现参数校验、超时和
 响应/输出大小限制，但注册表尚无通用 Schema 校验、工具超时或预算治理。
-Thinking 内容展示/回传、会话恢复、网页正文读取、MCP 和沙箱仍未实现。
+思考历史回传、会话恢复、网页正文读取、MCP 和沙箱仍未实现。
 
 `list_directory` 只列启动 cwd 内指定目录的直接子项，不执行 Shell、不读正文、不写文件。
 相对路径访问逐级拒绝符号链接，隐藏 `.git`、`.vortex`、`.env` 与 `.env.*`；条数、扫描量
@@ -93,6 +94,20 @@ Slash 补充验证（2026-10-13）：本次执行 `cargo check --workspace --all
 目录工具的 Windows 边界、并发目录替换、内核 I/O 硬超时及完整工具循环/HTTP/SSE
 专项覆盖仍不能由这些测试推断为已完成。
 
+Thinking 离线测试补充验证（2026-10-26）：在原有 94 项测试基线上新增 50 项，覆盖显式
+预设/逐字段覆盖、Enabled 请求与输出策略、同包思考/正文及工具增量、每模型步骤 256 KiB
+UTF-8 字节上限、工具轮数、Session 事件顺序/历史隔离/退出背压，以及 TUI 思考分区、阶段、
+失败片段保留、中文滚动和极小窗口。测试只使用固定 JSON、受控流和注入假凭据，不调用真实 API。
+`cargo test --workspace --all-features --locked --offline` 通过，共 144 项（CLI 15、Core 32、
+Provider 29、Tools 16、TUI 51、沙箱占位 1）；
+`cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings` 与
+`cargo build --release --locked --offline` 通过。作者完成全量格式化后，复核
+`cargo fmt --all -- --check`、上述严格 Clippy 与全部离线测试均通过。
+本轮补测试与同步文档未修改产品实现逻辑或用户配置。
+不把离线 Decoder 用例等同于 HTTP/SSE 字节分帧验收。
+作者已反馈诗词请求的 Thinking 正常显示；搜索场景仍被单步多工具调用限制阻断，记录为
+[Issue #3](https://github.com/AegeanZhang/vortex/issues/3)，工具往返尚未完成真实验收。
+
 ## 首版方向
 
 - Linux 优先，提供交互式 TUI；同时规划 `vortex exec "<task>"` 单次执行模式。
@@ -139,8 +154,9 @@ TUI 配置优先级为内置默认值 → 用户 `<vortex-home>/config.toml` →
 项目配置不向父目录查找，只能引用已有模型、关闭搜索或降低条数，不能新增服务地址或凭据来源。
 
 Provider profile 定义连接、接口方言与密钥变量名，模型 profile 定义服务端模型、能力和请求选项。
-thinking.mode 支持 provider-default（省略参数，不等于关闭）或 disabled；后者要求声明
-关闭能力且方言能够表达。详见 [思考选项设计](docs/design/provider-thinking-options.md)。
+thinking.mode 支持 provider-default（省略参数，不等于关闭）、disabled，以及显式预设
+支持的 enabled。关闭要求声明能力且方言能够表达；当前开启仅支持 DashScope Qwen 的
+展示-only 预设，不通用于其他模型或接入。详见 [思考选项设计](docs/design/provider-thinking-options.md)。
 只读取选中模型的 key；搜索关闭或 Mock 不读搜索 key，秘塔缺 key 不回退 Mock。
 搜索开关仅控制 `web_search`，目录工具始终注册，没有新增 files 配置；当前 TUI 即使
 关闭搜索也要求所选模型声明支持工具调用。模型列表与创建入口使用实际注册表的同一能力要求。
@@ -181,7 +197,7 @@ TRACE；这只解决已知日志点，不代表所有日志/错误路径已完�
 
 1. 初始化 Rust 2024 Cargo workspace，完成 Provider 抽象、Session 事件接口和非流式 TUI v1。（已完成）
 2. 补齐文本 SSE、Mock 工具循环、Provider 转换和 TUI 工具状态测试，完成真实终端验收。
-3. 秘塔真实搜索与单层目录列表已接入，搜索正常路径已由作者人工跑通，目录工具已补离线测试；继续真实目录往返与搜索异常验收，再扩展其他内置工具及通用校验、超时和预算治理；独立推进 Thinking、重绘节流和 Turn 取消。
+3. 秘塔真实搜索与单层目录列表已接入，搜索正常路径已由作者人工跑通，目录工具已补离线测试；Qwen Thinking 展示与专项离线测试已接入，继续真实工具往返和搜索异常验收，再扩展其他工具及通用预算治理；重绘节流、思考历史回传和 Turn 取消独立推进。
 4. 模型/搜索 TOML 配置与 `/model` 首版已接入，旧菜单回归已适配；思考选项装配及离线测试已完成，继续补其他配置/切换专项和真实交互验收。
 5. 实现 JSONL 会话恢复、`bubblewrap` 沙箱和 stdio MCP client，并将 exec 迁移到共享 Session。
 6. 完善安装、CI、发布包、可观测性与跨平台抽象。

@@ -1,6 +1,6 @@
 # TUI 接口设计
 
-接口核对日期：2026-10-17。本文描述当前实现契约；模型选择已接入，但专项测试与真实交互验收待补，验证结果见根 README，后续能力单独标注。
+接口核对日期：2026-10-26。本文描述当前实现契约，包含 Thinking 步骤投影；离线与真实交互的验证边界见根 README，后续能力单独标注。
 
 本文档以文本流式和工具状态接口为基线，说明 `vortex-tui` 如何消费
 `vortex-core::SessionConnection`。Session actor 和 Provider 调用链见
@@ -15,7 +15,7 @@
 
 - CLI 加载分层配置、按需读取密钥、装配 ModelManager 和 ToolRegistry，再把 Session 连接交给 TUI。
 - Core 保存对话事实、执行 Turn 并发布 `CoreEvent`。
-- TUI 保存 Prompt、Transcript、CommandMenu、ModelPicker、pending/notice 和展示用 Session/模型状态。
+- TUI 保存 Prompt、Transcript、CommandMenu、ModelPicker、pending/notice、ResponsePhase 和展示用 Session/模型状态。
 - Ratatui、Crossterm 和 `ratatui-textarea` 类型不得进入 `vortex-core`。
 
 当前入口为：
@@ -193,25 +193,29 @@ TextArea 插入 CRLF 时会规范化为 LF；保留草稿的断言比较提交�
 | `CoreEvent` | `AppState` 变化 |
 | --- | --- |
 | `UserMessageAdded` | 追加 User Transcript entry |
-| `AssistantMessageStarted` | 状态设为 `Running`，清除 notice，创建空 Assistant entry |
-| `AssistantTextDelta` | 追加到最后一个 Assistant entry；不存在时创建一个 |
-| `TurnCompleted` | 状态设为 `Idle`，清除 notice |
-| `TurnFailed` | 状态设为 `Failed`，清除 notice 并追加 Error entry |
+| `AssistantMessageStarted` | 状态设为 `Running`，清除 notice，创建空 Assistant entry，阶段设为 Waiting |
+| `ModelStepStarted` | 复用完全空的 Assistant 或创建新 entry，阶段设为 Waiting，notice 显示步骤号 |
+| `AssistantReasoningDelta` | 追加独立 reasoning；尚未 Answering 时阶段设为 Reasoning |
+| `AssistantTextDelta` | 追加到最后一个 Assistant entry；不存在时创建一个，阶段设为 Answering |
+| `TurnCompleted` | 状态设为 `Idle`，清除 notice 与阶段 |
+| `TurnFailed` | 状态设为 `Failed`，清除 notice 与阶段，并追加 Error entry |
 | `CommandRejected` | 只更新 notice，不改状态和 Transcript |
-| `ToolCallStarted` | notice 显示 Running tool 和名称，重绘；状态仍为 Running |
-| `ToolCallFinished` | notice 显示 Tool completed/failed 并等待模型，重绘；不新增 Transcript entry |
+| `ToolCallStarted` | notice 显示 Running tool 和名称，阶段设为 Tool；状态仍为 Running |
+| `ToolCallFinished` | notice 显示 Tool completed/failed，阶段回到 Waiting；不新增 Transcript entry |
 | `ModelSelected` | 更新已确认模型；匹配 pending 时按草稿保护规则清理并关闭窗口，不改 status/Transcript |
 | `ModelSelectionRejected` | 匹配 pending 时清 pending 并显示原因，保留原模型、草稿和窗口 |
 
-Turn 失败时，如果最后一项是空 Assistant 占位，`Transcript::fail_assistant` 会先删除它；
-如果已存在部分回复，则保留部分内容并另加 Error entry。Snapshot 转换会恢复 User 和
-Assistant 消息，System 消息当前不显示；同时初始化模型目录与已选模型，不恢复旧 pending/UI 窗口。
+Turn 失败时，`Transcript::fail_assistant` 只删除 reasoning 与 content 都为空的最后一个
+Assistant 占位；有思考或正文均保留并另加 Error entry。Snapshot 只恢复 User/Assistant
+正文，System 不显示，也不恢复思考、步骤边界、pending 或 UI 窗口。Running snapshot
+初始化为 Waiting；它不是流重连或完整会话恢复接口。
 
-一个 Turn 的多个模型步骤共用一条 Assistant entry，步骤前缀与最终正文直接累积；尚未
-按工具步骤拆分展示或加入结果卡片。工具错误结果不等于 TurnFailed，模型仍可能继续回答。
-AssistantTextDelta 当前不清除工具 notice，它在文本实际编辑、补全、下一轮开始或 Turn 终态时更新/
-清除，不能把 waiting for model 当作精确的模型阶段状态。工具执行规则见
-[Agent loop](agent-loop.md)。
+每个有输出的模型步骤使用独立 Assistant entry，内部 reasoning/content 分开累积；
+步骤开始可复用完全空占位。尚无工具结果卡片，工具错误也不等于 TurnFailed。
+ResponsePhase 是 UI 专属 Waiting/Reasoning/Answering/Tool，不扩展 Core 的 SessionStatus；
+状态栏依次显示 Session 状态、阶段、已确认模型和 notice。同一步正文后晚到思考不使阶段
+退回 Reasoning，下一 ModelStepStarted 则重置为 Waiting。工具 notice 可继续保留至下次
+步骤或终态，不单凭 notice 判断阶段。详见 [Thinking 展示](thinking-display.md)。
 
 ## Event loop 与绘制
 
@@ -223,14 +227,15 @@ Session 返回的 CoreEvent；Session 不只是命令消费者，还负责发布
 
 Event loop 使用 `tokio::select!` 等待 `EventStream` 和 `CoreEventStream`。Action 经过
 reducer 产生 Effect，所有 Effect 执行完后再决定退出或重绘。`redraw` 标志会合并同一批
-Effect 中的重复请求，但当前没有定时 tick 或跨事件的刷新窗口。每个文本增量都会请求重绘，
+Effect 中的重复请求，但当前没有定时 tick 或跨事件的刷新窗口。每个正文或思考增量都会请求重绘，
 下一轮循环即可绘制；约 33 ms 的刷新节流仍是后续目标，不是现有行为。
 
 页面固定分为 header、transcript、status 和 prompt 四区。Transcript 使用
 `Paragraph` 换行渲染；空会话显示输入提示。内容溢出时显示纵向滚动条，支持键盘翻页、
 跳到开头或末尾、鼠标滚轮，并在未手动浏览历史时自动跟随最新消息。完整规则见
 [`transcript-scrolling.md`](transcript-scrolling.md)。Assistant 正文通过 `markdown.rs`
-逐消息转换，User/Error 保持纯文本；标签、间距、测高与滚动仍归 Transcript。
+逐条目转换，思考以 DarkGray 纯文本显示并添加 Thinking 标签，User/Error 也保持纯文本；
+两段内容合并为同一 Paragraph，标签、间距、测高与滚动仍归 Transcript。
 每次重绘按累积原文重新转换，不单独解析每个 delta，也不把展示结果写回 Session。
 Resize 已请求主动重绘，布局和菜单矩形按新 Frame 计算；这是常规绘制，不是强制清屏，
 不证明 Kitty 休眠恢复问题已经修复。菜单有极小区域隐藏策略，整体四区布局仍需人工验收。
@@ -255,9 +260,10 @@ widget 的确定性状态，不通过真实键盘或真实 Provider 制造条件
 | 同上 | `/model`、直接 ID、选择申请/成功/失败 | 不发送模型 Prompt，确认前不改模型，失败保留原绑定 |
 | 同上 | pending 后 Esc 改草稿、无关拒绝、Running 与退出 | 新草稿不清空、不重复选择/提交，仍可退出 |
 | 同上 | 每一种 `CoreEvent` | status、notice、Transcript 与 Redraw 一致 |
-| 同上 | 工具开始、成功/错误结果 | 只改变 notice；仍 Running，不新增 Transcript entry |
+| 同上 | 思考/正文/步骤/工具事件 | 阶段随事件切换，晚到思考不回退 Answering，工具事件仍 Running |
 | `widgets/transcript.rs` | 多段 delta | 内容追加到同一 Assistant entry |
 | 同上 | 失败前无内容/已有部分内容 | 分别删除空占位/保留部分回复，并追加 Error |
+| 同上 | Thinking、Markdown、多模型步骤 | 思考保留字面标记与弱化颜色，正文渲染 Markdown，步骤不混合 |
 | 同上 | Snapshot 投影 | User/Assistant 保留，System 隐藏，顺序不变 |
 | `widgets/prompt_editor.rs` | 普通输入、Backspace、Enter、提交重置 | `q` 等字符可输入，Enter 不新增行，取值后编辑状态恢复默认 |
 | `widgets/command_menu.rs` | 双候选、前缀筛选、关闭、单项/空项导航 | 裸 `/` 两项；`/ex` 单项；无候选不 panic |
@@ -278,8 +284,7 @@ fake Session/channel，禁止访问真实模型服务。
 
 - 模型目录过滤/分组、参数补全、鼠标选择，以及独立显式保存默认模型；不隐式写盘。
 - `CancelTurn`；未来 `Ctrl+C` 在 Running 时应先取消，Idle 时才退出。
-- Thinking 展示与跨事件重绘节流，目标见 [`streaming-response.md`](streaming-response.md)；
-  Provider 文本流已通过现有 `AssistantTextDelta` 接口投影，无需 TUI 解析 SSE。
+- Thinking 折叠、思考历史恢复与跨事件重绘节流，目标见 [`streaming-response.md`](streaming-response.md)。
 - Paste 与 bracketed-paste 生命周期、动态多行输入、更多 slash 命令与鼠标菜单交互。
 - pending_submit、Core 拒绝后的草稿恢复、退出完成确认、强制重绘恢复。
 - 工具详情/来源卡片、审批弹窗、多行提交策略和会话恢复。

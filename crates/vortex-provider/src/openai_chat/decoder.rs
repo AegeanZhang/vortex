@@ -263,3 +263,133 @@ impl OpenAiChatDecoder {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn finish(decoder: &mut OpenAiChatDecoder, reason: &str) -> Vec<ModelEvent> {
+        assert!(
+            decoder
+                .push_data(
+                    &json!({"choices": [{"index": 0,
+            "delta": {}, "finish_reason": reason}]})
+                    .to_string()
+                )
+                .unwrap()
+                .is_empty()
+        );
+        let events = decoder.push_data("[DONE]").unwrap();
+        decoder.finish_eof().unwrap();
+        events
+    }
+
+    #[test]
+    fn emits_reasoning_and_text_from_the_same_chunk() {
+        let mut decoder = OpenAiChatDecoder::default();
+        assert_eq!(decoder.push_data(r#"{"choices":[{"index":0,"delta":{"reasoning_content":"分析","content":"回答"},"finish_reason":null}]}"#).unwrap(), vec![
+            ModelEvent::ReasoningDelta { delta: "分析".into() },
+            ModelEvent::TextDelta { delta: "回答".into() },
+        ]);
+        assert_eq!(
+            finish(&mut decoder, "stop"),
+            vec![ModelEvent::Finished {
+                reason: FinishReason::Stop
+            }]
+        );
+    }
+
+    #[test]
+    fn empty_and_null_reasoning_do_not_emit_events() {
+        let mut decoder = OpenAiChatDecoder::default();
+        for delta in [
+            json!({}),
+            json!({"reasoning_content": ""}),
+            json!({"reasoning_content": null}),
+        ] {
+            assert!(
+                decoder
+                    .push_data(&json!({"choices": [{"index": 0, "delta": delta}]}).to_string())
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        finish(&mut decoder, "stop");
+    }
+
+    #[test]
+    fn interleaved_reasoning_and_tool_arguments_keep_separate_buffers() {
+        let mut decoder = OpenAiChatDecoder::default();
+        for (reasoning, call) in [
+            (
+                "先查",
+                json!({"index": 0, "id": "fixture-call", "type": "function",
+                "function": {"name": "web_search", "arguments": "{\"query\":"}}),
+            ),
+            (
+                "再答",
+                json!({"index": 0, "id": "", "function": {"arguments": "\"rust\"}"}}),
+            ),
+        ] {
+            assert_eq!(
+                decoder
+                    .push_data(
+                        &json!({"choices": [{"index": 0, "delta": {
+                "reasoning_content": reasoning, "tool_calls": [call]}}]})
+                        .to_string()
+                    )
+                    .unwrap(),
+                vec![ModelEvent::ReasoningDelta {
+                    delta: reasoning.into()
+                }]
+            );
+        }
+        assert_eq!(
+            finish(&mut decoder, "tool_calls"),
+            vec![
+                ModelEvent::ToolCall {
+                    call: ToolCall {
+                        call_id: "fixture-call".into(),
+                        name: "web_search".into(),
+                        arguments: json!({"query": "rust"})
+                    }
+                },
+                ModelEvent::Finished {
+                    reason: FinishReason::ToolCalls
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn reasoning_does_not_make_missing_done_a_success() {
+        let mut decoder = OpenAiChatDecoder::default();
+        decoder.push_data(r#"{"choices":[{"index":0,"delta":{"reasoning_content":"分析"},"finish_reason":"stop"}]}"#).unwrap();
+        assert!(matches!(
+            decoder.finish_eof(),
+            Err(ProviderError::InvalidResponse(_))
+        ));
+        assert!(matches!(
+            decoder.push_data("[DONE]").unwrap().as_slice(),
+            [ModelEvent::Finished {
+                reason: FinishReason::Stop
+            }]
+        ));
+    }
+
+    #[test]
+    fn reasoning_does_not_relax_tool_call_validation() {
+        for call in [json!({"index": 1}), json!({"index": 0, "id": "changed-id"})] {
+            let mut decoder = OpenAiChatDecoder::default();
+            decoder.push_data(r#"{"choices":[{"index":0,"delta":{"reasoning_content":"分析","tool_calls":[{"index":0,"id":"fixture-call","function":{"name":"web_search","arguments":"{}"}}]}}]}"#).unwrap();
+            assert!(matches!(
+                decoder.push_data(
+                    &json!({"choices": [{"index": 0, "delta": {"tool_calls": [call]}}]})
+                        .to_string()
+                ),
+                Err(ProviderError::InvalidResponse(_))
+            ));
+        }
+    }
+}

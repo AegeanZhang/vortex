@@ -1,12 +1,13 @@
 use std::{env, sync::Arc};
 
 use vortex_core::{
-    ModelFactory, ModelInfo, ModelProvider, ModelSelectionError, ThinkingCapabilities,
+    ModelFactory, ModelInfo, ModelProvider, ModelSelectionError, ThinkingCapabilitiesOverride,
     ThinkingOptions,
     config::{ApiFlavor, AppConfig, ConfigError, ProviderKind},
 };
 use vortex_provider::{
     OpenAiChatDialect, OpenAiChatOptions, OpenAiChatProvider, RequestOptionsError,
+    resolve_thinking_profile,
 };
 
 #[derive(Debug)]
@@ -75,14 +76,23 @@ impl ConfiguredModelFactory {
                 let host = url
                     .host_str()
                     .ok_or(ConfigError::Invalid("Provider URL 缺少 host"))?;
+                let tool_reason = (requires_tools && !model.supports_tools)
+                    .then(|| "当前已注册工具，该模型未声明工具调用支持".to_string());
+                let options_reason = chat_options(
+                    provider.api_flavor,
+                    model.thinking,
+                    model.thinking_preset.as_deref(),
+                    model.thinking_capabilities,
+                )
+                .err()
+                .map(|error| error.to_string());
                 Ok(ModelInfo {
                     id: id.clone(),
                     display_name: model.display_name.clone(),
                     provider_id: model.provider.clone(),
                     endpoint_host: host.into(),
                     supports_tools: model.supports_tools,
-                    unavailable_reason: (requires_tools && !model.supports_tools)
-                        .then(|| "当前已注册工具，该模型未声明工具调用支持".into()),
+                    unavailable_reason: tool_reason.or(options_reason),
                 })
             })
             .collect::<Result<Vec<_>, ConfigError>>()?;
@@ -99,17 +109,20 @@ impl ConfiguredModelFactory {
 fn chat_options(
     api_flavor: ApiFlavor,
     thinking: ThinkingOptions,
-    thinking_capabilities: ThinkingCapabilities,
+    thinking_preset: Option<&str>,
+    overrides: ThinkingCapabilitiesOverride,
 ) -> Result<OpenAiChatOptions, RequestOptionsError> {
     let dialect = match api_flavor {
         ApiFlavor::Generic => OpenAiChatDialect::Generic,
         ApiFlavor::Dashscope => OpenAiChatDialect::DashScope,
         ApiFlavor::Deepseek => OpenAiChatDialect::DeepSeek,
     };
+    let resolved = resolve_thinking_profile(dialect, thinking_preset, overrides)?;
     let options = OpenAiChatOptions {
         dialect,
         thinking,
-        thinking_capabilities,
+        thinking_capabilities: resolved.capabilities,
+        history_policy: resolved.history_policy,
     };
     options.validate()?;
     Ok(options)
@@ -144,6 +157,7 @@ impl ModelFactory for ConfiguredModelFactory {
                 let options = chat_options(
                     profile.api_flavor,
                     model.thinking,
+                    model.thinking_preset.as_deref(),
                     model.thinking_capabilities,
                 )
                 .map_err(|error| fail(error.to_string()))?;
@@ -167,7 +181,7 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
     use vortex_core::{
-        ModelManager, ThinkingMode,
+        ModelManager, ThinkingCapabilitiesOverride, ThinkingMode,
         config::{ModelConfig, ProviderConfig},
     };
 
@@ -176,10 +190,121 @@ mod tests {
     }
 
     #[test]
+    fn enabled_profiles_are_validated_consistently_before_reading_credentials() {
+        let mut config = AppConfig::default();
+        let enabled = {
+            let mut model = config.models["qwen-max"].clone();
+            model.thinking.mode = ThinkingMode::Enabled;
+            model
+        };
+        let mut missing = enabled.clone();
+        missing.thinking_capabilities.can_enable = Some(false);
+        let mut no_history = enabled.clone();
+        no_history.thinking_capabilities.supports_history_control = Some(false);
+        let mut unknown = enabled.clone();
+        unknown.thinking_preset = Some("unknown-preset".into());
+        let mut unverified = enabled.clone();
+        unverified.thinking_preset = None;
+        unverified.thinking_capabilities = ThinkingCapabilitiesOverride {
+            can_enable: Some(true),
+            can_disable: Some(true),
+            supports_history_control: Some(true),
+        };
+        config.providers.insert(
+            "other".into(),
+            ProviderConfig {
+                kind: ProviderKind::OpenaiChat,
+                api_flavor: ApiFlavor::Deepseek,
+                base_url: "https://example.test".into(),
+                api_key_env: "UNUSED_FIXTURE_KEY".into(),
+            },
+        );
+        let mut mismatch = enabled.clone();
+        mismatch.provider = "other".into();
+        let mut unsupported = mismatch.clone();
+        unsupported.thinking_preset = None;
+        for (id, model) in [
+            ("enabled", enabled),
+            ("missing", missing),
+            ("no-history", no_history),
+            ("unknown", unknown),
+            ("unverified", unverified),
+            ("mismatch", mismatch),
+            ("unsupported", unsupported),
+        ] {
+            config.models.insert(id.into(), model);
+        }
+        let reads = Arc::new(Mutex::new(Vec::<String>::new()));
+        let captured = reads.clone();
+        let factory = Arc::new(
+            ConfiguredModelFactory::with_key_reader(
+                config,
+                test_client(),
+                true,
+                Arc::new(move |name| {
+                    captured.lock().unwrap().push(name.into());
+                    Ok("fixture-key".into())
+                }),
+            )
+            .unwrap(),
+        );
+        assert!(reads.lock().unwrap().is_empty());
+        for (id, reason) in [
+            ("missing", "未声明支持"),
+            ("no-history", "关闭思考历史"),
+            ("unknown", "未知思考能力预设"),
+            ("unverified", "未声明展示-only 历史契约"),
+            ("mismatch", "不匹配"),
+            ("unsupported", "不支持思考策略"),
+        ] {
+            let catalog_reason = factory
+                .catalog()
+                .into_iter()
+                .find(|info| info.id == id)
+                .unwrap()
+                .unavailable_reason
+                .unwrap();
+            assert!(catalog_reason.contains(reason), "{id}: {catalog_reason}");
+            assert_eq!(factory.create(id).err().unwrap().message, catalog_reason);
+        }
+        assert!(reads.lock().unwrap().is_empty());
+        let mut manager = ModelManager::new(factory, "qwen-max").unwrap();
+        assert_eq!(
+            manager.provider().reasoning_output_policy(),
+            vortex_core::ReasoningOutputPolicy::Reject
+        );
+        manager.select("enabled").unwrap();
+        let original = manager.provider();
+        assert_eq!(
+            original.reasoning_output_policy(),
+            vortex_core::ReasoningOutputPolicy::DisplayOnly
+        );
+        for id in [
+            "missing",
+            "no-history",
+            "unknown",
+            "unverified",
+            "mismatch",
+            "unsupported",
+        ] {
+            assert!(manager.select(id).is_err());
+            assert_eq!(manager.current().id, "enabled");
+            assert!(Arc::ptr_eq(&original, &manager.provider()));
+        }
+        assert_eq!(*reads.lock().unwrap(), vec!["QWEN_API_KEY", "QWEN_API_KEY"]);
+    }
+
+    #[test]
     fn invalid_thinking_combination_is_rejected_before_reading_key() {
         let mut config = AppConfig::default();
         config.search.enabled = false;
         config.providers.get_mut("qwen").unwrap().api_flavor = ApiFlavor::Generic;
+        let model = config.models.get_mut("qwen-max").unwrap();
+        model.thinking_preset = None;
+        model.thinking_capabilities = ThinkingCapabilitiesOverride {
+            can_disable: Some(true),
+            ..Default::default()
+        };
         let factory = ConfiguredModelFactory::with_key_reader(
             config,
             test_client(),
@@ -195,11 +320,9 @@ mod tests {
     fn missing_capability_is_rejected_before_reading_key() {
         let mut config = AppConfig::default();
         config.search.enabled = false;
-        config
-            .models
-            .get_mut("qwen-max")
-            .unwrap()
-            .thinking_capabilities = ThinkingCapabilities::default();
+        let model = config.models.get_mut("qwen-max").unwrap();
+        model.thinking_preset = None;
+        model.thinking_capabilities = ThinkingCapabilitiesOverride::default();
         let factory = ConfiguredModelFactory::with_key_reader(
             config,
             test_client(),
@@ -216,6 +339,13 @@ mod tests {
         let mut config = AppConfig::default();
         config.search.enabled = false;
         config.providers.get_mut("qwen").unwrap().api_flavor = ApiFlavor::Deepseek;
+        let model = config.models.get_mut("qwen-max").unwrap();
+        model.thinking_preset = None;
+        model.thinking_capabilities = ThinkingCapabilitiesOverride {
+            can_disable: Some(true),
+            supports_history_control: Some(true),
+            ..Default::default()
+        };
         let factory = ConfiguredModelFactory::with_key_reader(
             config,
             test_client(),
@@ -250,9 +380,11 @@ mod tests {
                 thinking: ThinkingOptions {
                     mode: ThinkingMode::Disabled,
                 },
-                thinking_capabilities: ThinkingCapabilities {
-                    can_disable: true,
-                    supports_history_control: false,
+                thinking_preset: None,
+                thinking_capabilities: ThinkingCapabilitiesOverride {
+                    can_enable: None,
+                    can_disable: Some(true),
+                    supports_history_control: Some(false),
                 },
             },
         );
@@ -282,40 +414,60 @@ mod tests {
 
     #[test]
     fn same_provider_can_assemble_distinct_model_thinking_policies() {
-        let supported = ThinkingCapabilities {
-            can_disable: true,
-            supports_history_control: true,
+        let supported = ThinkingCapabilitiesOverride {
+            can_enable: Some(false),
+            can_disable: Some(true),
+            supports_history_control: Some(true),
         };
         let default = chat_options(
             ApiFlavor::Dashscope,
             ThinkingOptions::default(),
-            ThinkingCapabilities::default(),
+            None,
+            ThinkingCapabilitiesOverride::default(),
         )
         .unwrap();
+
         let disabled = chat_options(
             ApiFlavor::Dashscope,
             ThinkingOptions {
                 mode: ThinkingMode::Disabled,
             },
+            None,
             supported,
         )
         .unwrap();
+
         assert_eq!(default.dialect, disabled.dialect);
         assert_eq!(default.thinking.mode, ThinkingMode::ProviderDefault);
         assert_eq!(disabled.thinking.mode, ThinkingMode::Disabled);
-        let hosted_capabilities = ThinkingCapabilities {
-            can_disable: true,
-            supports_history_control: false,
+
+        let hosted_capabilities = ThinkingCapabilitiesOverride {
+            can_enable: Some(false),
+            can_disable: Some(true),
+            supports_history_control: Some(false),
         };
-        let hosted =
-            chat_options(ApiFlavor::Dashscope, disabled.thinking, hosted_capabilities).unwrap();
+
+        let hosted = chat_options(
+            ApiFlavor::Dashscope,
+            disabled.thinking,
+            None,
+            hosted_capabilities,
+        )
+        .unwrap();
+
         assert_eq!(hosted.dialect, disabled.dialect);
         assert!(!hosted.thinking_capabilities.supports_history_control);
         assert!(disabled.thinking_capabilities.supports_history_control);
+
         assert_eq!(
-            chat_options(ApiFlavor::Deepseek, disabled.thinking, hosted_capabilities)
-                .unwrap()
-                .dialect,
+            chat_options(
+                ApiFlavor::Deepseek,
+                disabled.thinking,
+                None,
+                hosted_capabilities
+            )
+            .unwrap()
+            .dialect,
             OpenAiChatDialect::DeepSeek,
         );
     }
@@ -323,8 +475,10 @@ mod tests {
     fn config_with_undeclared_model() -> AppConfig {
         let mut config = AppConfig::default();
         config.search.enabled = false;
+
         let mut model = config.models["qwen-max"].clone();
-        model.thinking_capabilities = ThinkingCapabilities::default();
+        model.thinking_preset = None;
+        model.thinking_capabilities = ThinkingCapabilitiesOverride::default();
         config.models.insert("undeclared".into(), model);
         config
     }

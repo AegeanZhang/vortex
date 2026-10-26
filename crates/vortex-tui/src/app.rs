@@ -12,6 +12,14 @@ struct PendingModel {
     command_draft: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResponsePhase {
+    Waiting,
+    Reasoning,
+    Answering,
+    Tool,
+}
+
 #[derive(Debug)]
 pub(crate) struct AppState {
     status: SessionStatus,
@@ -23,6 +31,7 @@ pub(crate) struct AppState {
     available_models: Vec<ModelInfo>,
     model_picker: ModelPicker,
     pending_model: Option<PendingModel>,
+    response_phase: Option<ResponsePhase>,
 }
 
 impl Default for AppState {
@@ -37,6 +46,7 @@ impl Default for AppState {
             available_models: Vec::new(),
             model_picker: ModelPicker::default(),
             pending_model: None,
+            response_phase: None,
         }
     }
 }
@@ -53,6 +63,8 @@ impl From<SessionSnapshot> for AppState {
             available_models: snapshot.models,
             model_picker: ModelPicker::default(),
             pending_model: None,
+            response_phase: (snapshot.status == SessionStatus::Running)
+                .then_some(ResponsePhase::Waiting),
         }
     }
 }
@@ -72,6 +84,16 @@ impl AppState {
         */
 
         let mut line = status.to_string();
+
+        if let Some(phase) = self.response_phase {
+            let label = match phase {
+                ResponsePhase::Waiting => "等待模型",
+                ResponsePhase::Reasoning => "思考中",
+                ResponsePhase::Answering => "回答中",
+                ResponsePhase::Tool => "执行工具",
+            };
+            line.push_str(&format!(" | {label}"));
+        }
 
         if let Some(model) = &self.selected_model {
             line.push_str(&format!(" | Model: {}", model.id));
@@ -273,21 +295,25 @@ pub(crate) fn update(state: &mut AppState, action: UiAction) -> Vec<Effect> {
             state.status = SessionStatus::Running;
             state.notice = None;
             state.transcript.start_assistant();
+            state.response_phase = Some(ResponsePhase::Waiting);
             vec![Effect::Redraw]
         }
         UiAction::CoreEvent(CoreEvent::AssistantTextDelta { delta }) => {
             state.transcript.append_assistant_delta(delta);
+            state.response_phase = Some(ResponsePhase::Answering);
             vec![Effect::Redraw]
         }
         UiAction::CoreEvent(CoreEvent::TurnCompleted) => {
             state.status = SessionStatus::Idle;
             state.notice = None;
+            state.response_phase = None;
             vec![Effect::Redraw]
         }
         UiAction::CoreEvent(CoreEvent::TurnFailed { message }) => {
             state.status = SessionStatus::Failed;
             state.notice = None;
             state.transcript.fail_assistant(message);
+            state.response_phase = None;
             vec![Effect::Redraw]
         }
         UiAction::CoreEvent(CoreEvent::CommandRejected { message }) => {
@@ -296,6 +322,7 @@ pub(crate) fn update(state: &mut AppState, action: UiAction) -> Vec<Effect> {
         }
         UiAction::CoreEvent(CoreEvent::ToolCallStarted { call }) => {
             state.notice = Some(format!("Running tool: {}", call.name));
+            state.response_phase = Some(ResponsePhase::Tool);
             vec![Effect::Redraw]
         }
         UiAction::CoreEvent(CoreEvent::ToolCallFinished { name, result }) => {
@@ -304,6 +331,7 @@ pub(crate) fn update(state: &mut AppState, action: UiAction) -> Vec<Effect> {
             } else {
                 format!("Tool completed: {name}; waiting for model")
             });
+            state.response_phase = Some(ResponsePhase::Waiting);
             vec![Effect::Redraw]
         }
         UiAction::CoreEvent(CoreEvent::ModelSelected { model }) => {
@@ -335,6 +363,19 @@ pub(crate) fn update(state: &mut AppState, action: UiAction) -> Vec<Effect> {
                 state.notice = Some(message);
             }
             // 保留当前模型、原草稿和仍打开的窗口，允许重新选择。
+            vec![Effect::Redraw]
+        }
+        UiAction::CoreEvent(CoreEvent::ModelStepStarted { step }) => {
+            state.transcript.start_model_step();
+            state.response_phase = Some(ResponsePhase::Waiting);
+            state.notice = Some(format!("模型步骤 {step}"));
+            vec![Effect::Redraw]
+        }
+        UiAction::CoreEvent(CoreEvent::AssistantReasoningDelta { delta }) => {
+            state.transcript.append_reasoning_delta(delta);
+            if !matches!(state.response_phase, Some(ResponsePhase::Answering)) {
+                state.response_phase = Some(ResponsePhase::Reasoning);
+            }
             vec![Effect::Redraw]
         }
         UiAction::ScrollTranscript(command) => {
@@ -372,6 +413,149 @@ mod tests {
         UiAction::EditPrompt(KeyEvent::new(code, KeyModifiers::NONE).into())
     }
 
+    fn receive(state: &mut AppState, event: CoreEvent) {
+        assert_eq!(
+            update(state, UiAction::CoreEvent(event)),
+            vec![Effect::Redraw]
+        );
+    }
+
+    #[test]
+    fn response_phases_follow_model_and_tool_steps_without_late_reasoning_regression() {
+        let mut state = AppState::default();
+        receive(&mut state, CoreEvent::AssistantMessageStarted);
+        assert_eq!(state.status, SessionStatus::Running);
+        assert_eq!(state.response_phase, Some(ResponsePhase::Waiting));
+        receive(&mut state, CoreEvent::ModelStepStarted { step: 1 });
+        receive(
+            &mut state,
+            CoreEvent::AssistantReasoningDelta { delta: "R1".into() },
+        );
+        assert_eq!(state.response_phase, Some(ResponsePhase::Reasoning));
+        assert!(state.status_line().contains("思考中"));
+        receive(
+            &mut state,
+            CoreEvent::AssistantTextDelta { delta: "P".into() },
+        );
+        receive(
+            &mut state,
+            CoreEvent::AssistantReasoningDelta {
+                delta: "late R1".into(),
+            },
+        );
+        assert_eq!(state.response_phase, Some(ResponsePhase::Answering));
+        assert!(state.status_line().contains("回答中"));
+        let call = vortex_core::ToolCall {
+            call_id: "fixture-call".into(),
+            name: "fixture_tool".into(),
+            arguments: Default::default(),
+        };
+        receive(
+            &mut state,
+            CoreEvent::ToolCallStarted { call: call.clone() },
+        );
+        assert_eq!(state.response_phase, Some(ResponsePhase::Tool));
+        assert!(state.status_line().contains("执行工具"));
+        receive(
+            &mut state,
+            CoreEvent::ToolCallFinished {
+                name: call.name,
+                result: vortex_core::ToolResult {
+                    call_id: call.call_id,
+                    output: "fixture result".into(),
+                    is_error: false,
+                },
+            },
+        );
+        assert_eq!(state.response_phase, Some(ResponsePhase::Waiting));
+        receive(&mut state, CoreEvent::ModelStepStarted { step: 2 });
+        assert_eq!(state.response_phase, Some(ResponsePhase::Waiting));
+        assert_eq!(state.notice.as_deref(), Some("模型步骤 2"));
+        receive(
+            &mut state,
+            CoreEvent::AssistantReasoningDelta { delta: "R2".into() },
+        );
+        assert_eq!(state.response_phase, Some(ResponsePhase::Reasoning));
+        receive(
+            &mut state,
+            CoreEvent::AssistantTextDelta { delta: "A".into() },
+        );
+        receive(&mut state, CoreEvent::TurnCompleted);
+        assert_eq!(state.status, SessionStatus::Idle);
+        assert_eq!(state.response_phase, None);
+        assert_eq!(state.notice, None);
+    }
+
+    #[test]
+    fn rejection_preserves_active_thinking_draft_and_pending_model() {
+        let mut state = state_with_draft("next prompt", SessionStatus::Running);
+        state.pending_model = Some(PendingModel {
+            model_id: "fixture-model".into(),
+            command_draft: "/model fixture-model".into(),
+        });
+        receive(&mut state, CoreEvent::AssistantMessageStarted);
+        receive(
+            &mut state,
+            CoreEvent::AssistantReasoningDelta { delta: "R".into() },
+        );
+        receive(
+            &mut state,
+            CoreEvent::CommandRejected {
+                message: "busy".into(),
+            },
+        );
+        assert_eq!(state.status, SessionStatus::Running);
+        assert_eq!(state.response_phase, Some(ResponsePhase::Reasoning));
+        assert_eq!(state.prompt_editor.text(), "next prompt");
+        assert_eq!(
+            state.pending_model.as_ref().unwrap().model_id,
+            "fixture-model"
+        );
+        assert_eq!(state.notice.as_deref(), Some("busy"));
+        receive(
+            &mut state,
+            CoreEvent::TurnFailed {
+                message: "fixture failure".into(),
+            },
+        );
+        assert_eq!(state.status, SessionStatus::Failed);
+        assert_eq!(state.response_phase, None);
+        assert_eq!(state.notice, None);
+    }
+
+    #[test]
+    fn status_line_combines_response_phase_dynamic_model_and_notice() {
+        let mut state = AppState::default();
+        receive(
+            &mut state,
+            CoreEvent::ModelSelected {
+                model: ModelInfo {
+                    id: "fixture-thinking".into(),
+                    display_name: "Fixture".into(),
+                    provider_id: "fixture".into(),
+                    endpoint_host: "example.test".into(),
+                    supports_tools: true,
+                    unavailable_reason: None,
+                },
+            },
+        );
+        receive(&mut state, CoreEvent::AssistantMessageStarted);
+        receive(&mut state, CoreEvent::ModelStepStarted { step: 1 });
+        receive(
+            &mut state,
+            CoreEvent::AssistantReasoningDelta { delta: "R".into() },
+        );
+        assert_eq!(
+            state.status_line(),
+            "Status: Running | 思考中 | Model: fixture-thinking | 模型步骤 1"
+        );
+        receive(&mut state, CoreEvent::TurnCompleted);
+        assert_eq!(
+            state.status_line(),
+            "Status: Idle | Model: fixture-thinking"
+        );
+    }
+
     #[test]
     fn quit_requests_shutdown_then_exit() {
         let mut state = AppState::default();
@@ -382,6 +566,23 @@ mod tests {
             effects,
             vec![Effect::SendCommand(AgentCommand::Shutdown), Effect::Exit,]
         );
+    }
+
+    #[test]
+    fn a_new_model_step_resets_answering_to_waiting() {
+        let mut state = AppState::default();
+        receive(&mut state, CoreEvent::AssistantMessageStarted);
+        receive(
+            &mut state,
+            CoreEvent::AssistantTextDelta {
+                delta: "prefix".into(),
+            },
+        );
+        assert_eq!(state.response_phase, Some(ResponsePhase::Answering));
+        receive(&mut state, CoreEvent::ModelStepStarted { step: 2 });
+        assert_eq!(state.response_phase, Some(ResponsePhase::Waiting));
+        assert_eq!(state.status, SessionStatus::Running);
+        assert!(state.status_line().contains("等待模型"));
     }
 
     #[test]

@@ -9,8 +9,10 @@
 滚动能力属于 `Transcript`，不新增含义模糊的 `MainArea` 组件：`ui.rs` 继续只划分区域，
 `Transcript` 负责内容高度、滚动位置和滚动条渲染。
 
-支持纵向滚动、键盘翻页、鼠标滚轮和自动跟随最新消息。Assistant 正文经 Markdown
-转换后参与同一套测高与滚动；不包含滑块拖动、文本选择、搜索、水平滚动或虚拟化。
+支持纵向滚动、键盘翻页、鼠标滚轮和自动跟随最新消息。每个模型步骤的 Assistant
+包含独立 reasoning/content：思考以 Thinking 标签和弱化纯文本显示，正文经 Markdown
+转换，两者合并成同一个 Paragraph 测高与滚动。步骤间保留条目边界，详见
+[Thinking 展示](thinking-display.md)。不包含折叠、滑块拖动、文本选择、搜索、水平滚动或虚拟化。
 
 ## 状态模型
 

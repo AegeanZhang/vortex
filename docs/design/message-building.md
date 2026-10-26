@@ -36,6 +36,11 @@ SessionMessage 仍是 role/content 文本，调用 ID 仍是 String，参数是�
 Session 保存完整内存历史，run_turn 按原顺序克隆历史并带上注册表的工具定义；还没有
 独立 ContextAssembler、Instruction、Token 预算、摘要或 JSONL 事件回放。
 
+当前 Qwen Thinking 是展示-only：ReasoningDelta 仅经进度事件进入 TUI，不进入
+ConversationItem、SessionMessage、Snapshot 或后续请求。工具前后由 ModelStepStarted
+划分展示条目，不改变权威历史。下文的思考保存/回传类型是后续目标，不能用当前
+reasoning 字符串展示推断已支持 DeepSeek 工具思考历史。
+
 每个工具步骤按 Assistant 前缀（如有）、ToolCall、ToolResult 的顺序回填；最终成功回答
 另写一次，后续失败不撤销已经完成的工具步骤。ToolRegistry 将工具错误转换为结果，
 参数由工具实现手动校验，尚无通用 Schema 验证器。执行前拒绝空白和历史/本轮重复 ID。

@@ -2,9 +2,9 @@
 
 本文说明 Vortex 的构建、运行入口。产品 TUI 使用文本 SSE、工具循环、目录列表与秘塔网页搜索，
 此前搜索正常路径已由作者人工跑通。本轮分层配置与模型选择已接入源码并通过编译/Review，
-思考选项、目录工具及相关装配/模型能力判断已补离线测试；
-完整配置与切换矩阵、真实交互验收仍待补充；
-以下配置用法描述当前代码，不表示新链路已人工跑通。
+思考预设、展示-only 事件链、目录工具及装配/模型能力判断已补离线测试。
+作者反馈 Qwen 诗词请求的 Thinking 可显示，Thinking 工具往返、完整配置/切换矩阵与
+真实终端验收仍待补充。以下配置用法描述当前代码，不表示所有接入或异常场景均已验收。
 完整验证边界以根 README 为准。其他命令和后续能力的
 目标形态见 [`../design/cli-surface.md`](../design/cli-surface.md)，不要把设计文档中的
 未实现部分当成现有功能。
@@ -55,7 +55,7 @@ cargo run -p vortex-cli --locked
 
 产品本身不读取 `.env`。输入 Prompt 后按 Enter 提交，输入 `/exit` 后按 Enter 退出。
 当前没有 Ctrl+C 退出映射；内置 Qwen profile 使用 DashScope 方言、disabled 策略及
-显式能力声明，关闭思考及思考历史。模型连接和搜索选项来自分层 TOML，不再要求修改 CLI 源码。
+显式能力预设，关闭思考及思考历史。模型连接和搜索选项来自分层 TOML，不再要求修改 CLI 源码。
 HOME 默认是原生用户主目录下 `.vortex`，无需设置 VORTEX_HOME；显式覆盖必须为非空
 绝对路径，例如 `export VORTEX_HOME="${HOME}/.vortex-dev"`。启动时在进入 TUI 前显示
 cwd、HOME、两条配置路径及 loaded/missing 状态、最终模型/Provider/host。
@@ -83,13 +83,10 @@ provider = "qwen"
 model = "qwen3.8-max"
 display_name = "Qwen Max"
 supports_tools = true
+thinking_preset = "dashscope-qwen-display-only"
 
 [models.qwen-max.thinking]
 mode = "disabled"
-
-[models.qwen-max.thinking_capabilities]
-can_disable = true
-supports_history_control = true
 
 [search]
 enabled = true
@@ -104,10 +101,43 @@ Provider 定义连接、接口方言和密钥变量名；模型 profile 定义�
 结构添加多个 profile，再用 `-m` 或 `/model` 选择其 ID，不直接输入服务端模型名。
 `supports_tools` 是用户声明而非远端探测。当前 TUI 始终注册目录工具，即使关闭搜索，
 所选模型也必须声明 `supports_tools=true`；不兼容 profile 在 `/model` 列表中标为不可选。
-`thinking.mode` 缺省为 `provider-default`，省略参数而不是关闭思考；当前文本阶段仍拒绝
-思考增量。显式 disabled 要求 can_disable=true，并与接口方言匹配。DeepSeek 官方与
+`thinking.mode` 缺省为 `provider-default`，省略参数而不是关闭思考；该模式与 disabled
+均拒绝意外返回的思考增量。显式 disabled 要求解析后 can_disable=true，并与接口方言匹配。DeepSeek 官方与
 百炼托管接入的参数不同，不能仅按模型名称配置；完整示例与旧字段迁移见
 [思考选项设计](../design/provider-thinking-options.md)。旧 request_options 字段已不接受。
+
+### 开启 Qwen Thinking
+
+在上述用户配置中新增完整模型条目，复用已有 `providers.qwen`：
+
+```toml
+[models.qwen-thinking]
+provider = "qwen"
+model = "qwen3.8-max"
+display_name = "Qwen Thinking"
+supports_tools = true
+thinking_preset = "dashscope-qwen-display-only"
+
+[models.qwen-thinking.thinking]
+mode = "enabled"
+```
+
+预设提供能力与展示-only 历史契约，通常不用填写 thinking_capabilities。仅写 enabled
+或手填三个 true 不够；该预设也不能用于 DeepSeek。原有无预设的关闭配置仍可使用
+显式 can_disable/supports_history_control，不强制迁移。
+
+保存配置后重启，再通过 `/model qwen-thinking` 选择，或启动时指定：
+
+```bash
+cargo run -p vortex-cli --locked -- -m qwen-thinking -c 'search.enabled=false'
+```
+
+该命令仍调用真实模型并可能计费；关闭搜索只是不调用搜索服务。可先用诗词等纯文本
+请求检查 Thinking 标签、弱化纯文本与 Markdown 正文。默认模型不会因新增 profile 改变。
+思考仅存本次 TUI 内存，不回传或恢复。当前 DeepSeek Enabled 不可用；Qwen 搜索可能
+触发单次响应多工具调用限制，详见 [Thinking 设计](../design/thinking-display.md#人工验收与已知限制)。
+
+### 项目配置与加载规则
 
 项目文件只检查启动 cwd 下的 `.vortex/project.toml`，不读取父目录或 Git 根。示例：
 
@@ -158,7 +188,7 @@ cargo run -p vortex-cli --locked -- -c 'search.max_results=3'
 不是本地逐字动画。CLI 默认注册的 `web_search` 调用秘塔独立网页搜索 API，不调用问答
 接口、不抓取来源全文；搜索结果回填给当前选中的模型，再由模型继续回答。查询会发送给秘塔，Prompt、
 工具定义与工具结果会发送给当前选中模型，两个服务可能分别计费；不要在查询中放入敏感内容。
-`MockWebSearch` 仅在显式配置时注册，不是默认工具。Thinking 内容展示/回传、定时刷新、会话恢复、
+`MockWebSearch` 仅在显式配置时注册，不是默认工具。思考历史回传、定时刷新、会话恢复、
 保留会话的 Turn 取消、MCP 和沙箱尚未实现。已实现代码的
 设计入口是 [`../design/session-runtime.md`](../design/session-runtime.md) 和
 [`../design/tui-interface.md`](../design/tui-interface.md)。

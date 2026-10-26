@@ -1,8 +1,12 @@
 # SSE 流式回答与 Thinking 展示设计
 
-- 日期：2026-09-19；代码契约更新：2026-10-01；临时稿回收：2026-10-06
-- 定位：文本/工具 SSE 契约及后续 Thinking/绘制节流设计；阶段 A 与阶段 B/C 不可混为一谈。
+- 日期：2026-09-19；代码契约更新：2026-10-26。
+- 定位：当前文本/工具 SSE 与 Thinking 展示契约，以及后续思考历史/绘制节流设计。
 - 范围：TUI → Session → 当前 Chat Completions 兼容 Provider；本轮不迁移 exec。
+
+百炼 Qwen 展示-only 接入、能力预设、模型步骤与增量投影已接入，详见
+[Thinking 展示 v1](thinking-display.md)。默认关闭行为仍保留；能力覆盖不能代替独立的
+历史适用契约或真实工具往返验收。阶段 C 与绘制节流仍是后续设计。
 
 文本流运行时见 [Session runtime](session-runtime.md)，显示边界见
 [TUI](tui-interface.md) 与 [滚动设计](transcript-scrolling.md)。工具循环见
@@ -17,12 +21,13 @@
 | 阶段 | 请求与展示 | 历史策略 |
 | --- | --- | --- |
 | A：文本/工具 SSE | 按接口方言与模型能力显式关闭思考，正文增量与单个工具调用分别处理 | 完成的工具步骤与最终成功回答进入历史 |
-| B：Thinking 展示 | 显式开启思考，思考纯文本与 Markdown 回答分区 | 显式关闭思考回传，思考仅保留于本次 UI |
-| C：思考历史（可选后续） | 启用前先扩展语义消息及请求映射 | 成功回答的思考独立保存，按支持的协议完整回传 |
+| B：Thinking 展示 | 显式开启思考，思考纯文本与 Markdown 回答按模型步骤分区 | 仅限明确允许在工具循环中省略思考回传的接入；思考只保留于本次 UI |
+| C：思考历史（可选后续） | 启用前先扩展语义消息及请求映射 | 按协议保存和回传完整模型/工具步骤的思考，不只保存最终回答 |
 
-阶段 A 的协议允许完整 ToolCall 结束一个模型步骤，再由 Core 决定执行和下一步请求；
-一个模型流完成不等于整个 Turn 完成。阶段 B 的目标是范围明确的思考展示，不假装支持
-默认开启的思考历史。阶段 C 不是显示 Thinking 的前置条件。CancelTurn、重连续传、
+阶段 A/B 均允许完整 ToolCall 结束一个模型步骤，再由 Core 决定执行和下一步请求；
+一个模型流完成不等于整个 Turn 完成。当前阶段 B 仅开放指定 Qwen 预设，不支持
+思考历史回传。阶段 C 对 Qwen 展示-only 方案可后置，但对要求工具思考回传的
+服务是启用该能力的前置条件；不允许跨协议套用 B。CancelTurn、重连续传、
 usage UI、菜单折叠和持久化不属于此版接口；阶段与测试覆盖现状见根 README。
 Shutdown 仍表示退出整个 Session，而非“取消本轮后继续聊天”。
 
@@ -48,6 +53,14 @@ pub type ModelStream =
 
 pub trait ModelProvider: Send + Sync {
     fn stream(&self, request: ModelRequest) -> ModelStream;
+    fn reasoning_output_policy(&self) -> ReasoningOutputPolicy {
+        ReasoningOutputPolicy::Reject
+    }
+}
+
+pub enum ReasoningOutputPolicy {
+    Reject,
+    DisplayOnly,
 }
 
 pub enum ModelEvent {
@@ -134,16 +147,17 @@ SecretString 如需 Clone 仍保留手写脱敏 Debug，不为打印日志开放
 
 每个 Turn 的 `run_turn` 任务由 `JoinSet<Result<TurnOutput, TurnError>>` 管理，使用独占的
 有界 TurnProgress 通道（容量 32）。任务处理多个模型步骤，进度发送端只由该任务持有。
-actor 的 ActiveTurn 只保存接收端；正文和每一步结束原因由 run_turn 管理。它维护历史
+actor 的 ActiveTurn 只保存接收端；正文、步骤编号、思考字节计数和每步结束原因由 run_turn 管理。它维护历史
 副本，不直接修改权威历史，也不把完整回答再次发送给 TUI。
 
 | 输入 | 处理位置与行为 |
 | --- | --- |
 | 有效 SubmitPrompt | 记录 User，发 UserMessageAdded、AssistantMessageStarted，启动本轮任务 |
 | TurnProgress::TextDelta | 发布 AssistantTextDelta；仍为 Running |
+| ModelStepStarted / 合法 ReasoningDelta | 转发步骤/思考事件；思考仅展示，不提交历史；仍为 Running |
 | ToolStarted / ToolFinished | 发布工具事件；完成步骤写入前缀/调用/结果，仍为 Running |
 | 模型 Finished(ToolCalls) | run_turn 执行工具并再次调用模型，不结束 Turn |
-| ReasoningDelta / Provider Err | run_turn 返回错误并释放流；此前进度排空后统一失败 |
+| Reject 策略收到 ReasoningDelta、思考超限或 Provider Err | run_turn 返回错误并释放流；此前进度排空后统一失败 |
 | 通道关闭 | 回收本轮 task，依据 TurnOutput/TurnError 或 JoinError 提交成功/失败 |
 | Running 时再次提交 | CommandRejected；不改当前缓冲、状态或历史 |
 | Shutdown / UI 消失 | 中止任务、丢弃活跃流并关闭 Session；不自动重试 |
@@ -161,17 +175,21 @@ actor 的主 select 和每一次事件发送均监听关闭；外部 AgentComman
 
 ## 5. 完成、失败和历史
 
-阶段 A 的成功序列为：
+当前成功序列为：
 
 ```text
 UserMessageAdded → AssistantMessageStarted
-→ [AssistantTextDelta（可选）、ToolCallStarted、ToolCallFinished]（零到多组）
-→ 一个或多个 AssistantTextDelta
+→ [ModelStepStarted → AssistantReasoningDelta* / AssistantTextDelta*
+   → ToolCallStarted → ToolCallFinished]（零到多组）
+→ ModelStepStarted → AssistantReasoningDelta* / AssistantTextDelta（最终正文非空）
 → TurnCompleted
 ```
 
-阶段 B 才增加零到多个 `AssistantReasoningDelta`；它目前不在 `CoreEvent` 中。
-接入后不依赖所有服务严格“先思考、后正文”，两类事件分别累积即可。
+每次模型请求前均发送 `ModelStepStarted`，关闭思考的 profile 同样具有步骤边界。
+只有 DisplayOnly 策略转发 `AssistantReasoningDelta`；不要求两类增量严格先后，
+正文在 run_turn 累积，思考按每步最多 256 KiB UTF-8 字节计数并转发，由 TUI 单独累积。
+超限增量不发布，已显示片段保留；新步骤重新计数。完整序列见
+[Thinking 展示设计](thinking-display.md#3-增量事件与模型步骤)。
 
 首版只有最终模型步骤以 Stop 结束且回答非空才算 Turn 成功；ToolCalls 表示继续执行。
 Length、ContentFilter、不支持的响应、空最终回答、非法 ID、工具轮数超限、
@@ -181,14 +199,17 @@ Length、ContentFilter、不支持的响应、空最终回答、非法 ID、工�
 未来支持带终态的不完整历史时另改该契约。
 
 成功时只把缓冲写入历史一次，不再次发整段 TextDelta。Thinking 不是新 MessageRole，
-不能将其并入回答。阶段 C 增加 `SessionMessage.reasoning: Option<String>`；User/System
+不能将其并入回答。未来阶段 C 可扩展 `SessionMessage.reasoning: Option<String>`；User/System
 为 None，成功 Assistant 独立保留。Snapshot 必须同步投影，不因恢复丢失该字段。
+上述是普通文本消息的历史目标，不足以单独满足工具思考协议：工具步骤的 Assistant
+reasoning、正文和 ToolCall 也须保持关联。DeepSeek 等接入的完整回传另行设计，不能
+仅给最终回答增加 reasoning 字段就宣称已实现阶段 C。
 
 ## 6. Thinking 参数与能力边界
 
 请求侧的跨供应商装配已按 [思考选项设计](provider-thinking-options.md) 接入并补离线测试：
-统一策略不等于统一厂商 JSON，不发送参数也不等于关闭思考。此次不修改当前
-ReasoningDelta 的拒绝行为。后续阶段 B/C 的拆分必须按协议能力判断；对于带 tools 时
+统一策略不等于统一厂商 JSON，不发送参数也不等于关闭思考。ProviderDefault/Disabled
+的输出策略仍为 Reject，只有已适配的 Enabled 为 DisplayOnly。后续协议接入必须按历史能力判断；对于带 tools 时
 要求回传思考历史的服务，不能只启用展示而遗漏请求历史支持。
 
 CLI 将配置的接口方言、模型策略与能力装配成 `OpenAiChatOptions`，不按模型名推断。
@@ -196,7 +217,7 @@ Provider 通过统一 `with_options` 校验并保存转换结果：DashScope 按
 DeepSeek 官方发送 thinking.type=disabled。Generic 只支持 ProviderDefault；默认省略
 控制字段，Disabled 不可表达时本地失败。旧千问专用 builder 已移除。
 
-下表仅是千问后续阶段的参数参考，不是当前配置支持的策略列表；B/C 尚未实现：
+下表为指定 Qwen 接入的阶段对照；A/B 已有请求装配，C 为后续目标，不通用于其他模型：
 
 | 阶段 | stream | enable_thinking | preserve_thinking |
 | --- | --- | --- | --- |
@@ -214,16 +235,24 @@ DeepSeek 官方发送 thinking.type=disabled。Generic 只支持 ProviderDefault
 reasoning item 不是同一种数据；未来 `/model` 必须做能力检查和明确转换/拒绝策略，不能
 把千问字段照搬到其他服务。API 没返回思考时只显示等待状态，不能补造思考文本。
 
-实施顺序应是请求选项 → run_turn 分别累积思考/正文 → TurnProgress 与 CoreEvent
-增量投影 → TUI 状态/布局 → 回归测试。不要恢复旧 ActiveTurn.content/reasoning 缓冲，
-当前 actor 只负责进度与权威历史。阶段 B 验证通过后，才单独决定是否实施阶段 C 的
+当前链路为请求选项 → run_turn 正文累积/思考计数 → TurnProgress/CoreEvent 转发
+→ TUI 分开累积与展示。不要恢复旧 ActiveTurn.content/reasoning 缓冲，actor 只负责
+进度与权威历史。阶段 B 验收后，再单独决定是否实施阶段 C 的
 历史字段、Snapshot 和请求回传；思考签名与 opaque 数据须留在正确的协议边界。
+2026-10-23 展示-only 方案不要求 run_turn 再保存一份完整思考，只计字节并传递增量，
+TUI 按模型步骤累积；Enabled 的接入与运行时拒绝策略见新设计，不以 ProviderDefault
+绕过未适配的思考历史。
+
+当前配置按“保守能力 → 显式预设 → 可选覆盖”解析，普通用户不必填写
+能力布尔值。Provider 内另保存预设的历史适用标记；supports_history_control=true
+不等于工具循环可以省略 reasoning。无预设但能力覆盖全 true 的 Enabled 仍拒绝。
+未知预设/方言不匹配在读取 key 前失败；不在线探测，也不扩大阶段 B 的协议范围。
+Qwen 当前支持部分 reasoning_effort 用法不代表跨厂商历史语义一致，本轮保留原字段转换。
 
 ## 7. TUI 投影与刷新
 
-阶段 A 复用已有 `AssistantTextDelta`：追加原文并请求重绘，不需要 TUI 解析 SSE。
-以下 Thinking 投影属于阶段 B，尚未实现：新增 `CoreEvent::AssistantReasoningDelta`，
-同一个 Assistant entry 保存 `reasoning` 与
+正文通过 `AssistantTextDelta` 追加原文并请求重绘，TUI 不解析 SSE。
+思考通过 `CoreEvent::AssistantReasoningDelta` 投影，同一模型步骤的 Assistant entry 保存 `reasoning` 与
 `content` 两段，前者弱化颜色、按纯文本渲染，后者仍由 `markdown.rs` 处理。标签和间距
 由 Transcript 添加，合并后的同一个 Paragraph 同时负责测高与绘制。
 
@@ -231,6 +260,8 @@ reasoning item 不是同一种数据；未来 `/model` 必须做能力检查和�
   状态，Core 的 Running 不必拆分。已进入回答阶段后不因晚来的思考增量退回等待。
 - 思考可见但正文为空时，失败清理不能删掉整条 Assistant；只有两者都空才删除占位。
 - 阶段 B 保留已显示思考直至当前 TUI 结束，但不写入模型历史；阶段 C Snapshot 同步支持。
+- 每次 ModelStepStarted 建立或复用空 Assistant 占位，工具前后有内容的步骤分开，不能将
+  同一 Turn 的多次模型输出无边界地拼接。具体状态与失败规则见 [Thinking v1](thinking-display.md)。
 - 第一版不自动折叠，避免完成时高度突变；人工折叠和语义阅读锚点留到后续。
 
 绘制节流是独立的待实施步骤。当前每个 Delta 请求重绘，仅合并同批 Effect，不跨事件合并。
@@ -250,7 +281,8 @@ TUI 提交分支的输入原文 TRACE 也已在 slash 接入时移除；这不�
 已经完成脱敏验收，不应为排障默认开启正文诊断。
 模型文本不执行、不作为命令，控制字符过滤仍是独立工作，不能声称 SSE/Markdown 已提供防护。
 
-下表是验收目标，Thinking 与节流相关用例随对应阶段补齐，不表示已有这些能力或完整覆盖。
+下表包含已覆盖与待补的验收目标。Thinking 展示已有离线测试，HTTP 字节分帧、节流与
+思考历史仍需分别验证；实际检查记录以根 README 为准。
 
 | 层 | 必须验证 |
 | --- | --- |

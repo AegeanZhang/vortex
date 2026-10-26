@@ -34,7 +34,8 @@ CLI 工厂直接使用 URL host 校验，需自行声明 url 依赖；Core/CLI �
 用于隔离文件测试。实际版本仍由根 Cargo.lock 固定，依赖存在不代表专项测试已补齐。
 
 Core 定义 ModelFactory/ModelManager，只认识元数据和 Provider trait；CLI 的
-ConfiguredModelFactory 将接口方言、模型思考策略与能力映射为 OpenAiChatOptions，先校验
+ConfiguredModelFactory 解析显式思考预设与可选覆盖，再将方言、策略、能力和独立历史契约
+映射为 OpenAiChatOptions，先校验
 再按需读取 key，并注入共享 Reqwest client；厂商字段转换留在 Provider，见
 [思考选项设计](../design/provider-thinking-options.md)。模型 client 和秘塔 client 均关闭自动重定向与隐式重试；Factory 只本地装配，不
 执行探测请求，不承担 OAuth/订阅登录。

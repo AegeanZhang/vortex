@@ -64,6 +64,8 @@ pub enum CoreEvent {
     ToolCallFinished { name: String, result: ToolResult },
     ModelSelected { model: ModelInfo },
     ModelSelectionRejected { model_id: String, message: String },
+    ModelStepStarted { step: u32 },
+    AssistantReasoningDelta { delta: String },
 }
 
 #[derive(Clone)]
@@ -343,6 +345,30 @@ pub fn start_session(mut models: ModelManager, tools: ToolRegistry) -> SessionCo
                     }
                 }
 
+                RuntimeInput::Turn(Some(TurnProgress::ModelStepStarted { step })) => {
+                    if !publish_event(
+                        &event_sender,
+                        &mut shutdown_receiver,
+                        CoreEvent::ModelStepStarted { step },
+                    )
+                    .await
+                    {
+                        break;
+                    }
+                }
+
+                RuntimeInput::Turn(Some(TurnProgress::ReasoningDelta { delta })) => {
+                    if !publish_event(
+                        &event_sender,
+                        &mut shutdown_receiver,
+                        CoreEvent::AssistantReasoningDelta { delta },
+                    )
+                    .await
+                    {
+                        break;
+                    }
+                }
+
                 RuntimeInput::Turn(None) => {
                     // 通道已关闭且排队事件已消费完。
                     // take 会把 active 便会 None, 并交出本轮状态。
@@ -518,6 +544,7 @@ mod tests {
         .await;
 
         expect_event(events, CoreEvent::AssistantMessageStarted).await;
+        expect_event(events, CoreEvent::ModelStepStarted { step: 1 }).await;
     }
 
     async fn close_session(agent: &AgentHandle, events: &mut CoreEventStream) {
@@ -544,6 +571,236 @@ mod tests {
 
     fn scripted(items: Vec<ModelItem>) -> ModelStream {
         Box::pin(futures_util::stream::iter(items))
+    }
+
+    struct ThinkingFakeProvider(FakeProvider);
+
+    impl ThinkingFakeProvider {
+        fn new(streams: Vec<ModelStream>) -> Self {
+            Self(FakeProvider::new(streams))
+        }
+    }
+
+    impl ModelProvider for ThinkingFakeProvider {
+        fn stream(&self, request: ModelRequest) -> ModelStream {
+            self.0.stream(request)
+        }
+
+        fn reasoning_output_policy(&self) -> crate::ReasoningOutputPolicy {
+            crate::ReasoningOutputPolicy::DisplayOnly
+        }
+    }
+
+    fn thinking(delta: &str) -> ModelItem {
+        Ok(ModelEvent::ReasoningDelta {
+            delta: delta.into(),
+        })
+    }
+
+    async fn expect_thinking(events: &mut CoreEventStream, delta: &str) {
+        expect_event(
+            events,
+            CoreEvent::AssistantReasoningDelta {
+                delta: delta.into(),
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn thinking_turn_publishes_ordered_events_and_only_one_terminal_event() {
+        let provider = Arc::new(ThinkingFakeProvider::new(vec![scripted(vec![
+            thinking("R"),
+            text("A"),
+            stop(),
+        ])]));
+        let SessionConnection {
+            agent, mut events, ..
+        } = start_session(test_models(provider), ToolRegistry::empty());
+        begin_turn(&agent, &mut events, "fixture prompt").await;
+        expect_thinking(&mut events, "R").await;
+        expect_event(
+            &mut events,
+            CoreEvent::AssistantTextDelta { delta: "A".into() },
+        )
+        .await;
+        expect_event(&mut events, CoreEvent::TurnCompleted).await;
+        close_session(&agent, &mut events).await;
+    }
+
+    #[tokio::test]
+    async fn reasoning_arrives_before_the_provider_finishes() {
+        let (stream, sender, started, dropped) = controlled_stream();
+        let provider = Arc::new(ThinkingFakeProvider::new(vec![stream]));
+        let SessionConnection {
+            agent, mut events, ..
+        } = start_session(test_models(provider), ToolRegistry::empty());
+        begin_turn(&agent, &mut events, "fixture prompt").await;
+        within(started).await.unwrap();
+        sender.send(thinking("R")).unwrap();
+        expect_thinking(&mut events, "R").await;
+        assert!(matches!(
+            events.receiver.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        sender.send(text("A")).unwrap();
+        sender.send(stop()).unwrap();
+        expect_event(
+            &mut events,
+            CoreEvent::AssistantTextDelta { delta: "A".into() },
+        )
+        .await;
+        expect_event(&mut events, CoreEvent::TurnCompleted).await;
+        within(dropped).await.unwrap();
+        close_session(&agent, &mut events).await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_during_thinking_drops_the_active_stream() {
+        let (stream, sender, started, dropped) = controlled_stream();
+        let provider = Arc::new(ThinkingFakeProvider::new(vec![stream]));
+        let SessionConnection {
+            agent, mut events, ..
+        } = start_session(test_models(provider), ToolRegistry::empty());
+        begin_turn(&agent, &mut events, "fixture prompt").await;
+        within(started).await.unwrap();
+        sender.send(thinking("R")).unwrap();
+        expect_thinking(&mut events, "R").await;
+        within(agent.send(AgentCommand::Shutdown)).await.unwrap();
+        within(dropped).await.unwrap();
+        assert_eq!(within(events.recv()).await, None);
+        assert!(sender.is_closed());
+    }
+
+    #[tokio::test]
+    async fn next_turn_contains_the_answer_once_but_never_reasoning() {
+        let provider = Arc::new(ThinkingFakeProvider::new(vec![
+            scripted(vec![thinking("R1"), text("A1"), stop()]),
+            scripted(vec![thinking("R2"), text("A2"), stop()]),
+        ]));
+        let SessionConnection {
+            agent, mut events, ..
+        } = start_session(test_models(provider.clone()), ToolRegistry::empty());
+        for (prompt, reasoning, answer) in [("U1", "R1", "A1"), ("U2", "R2", "A2")] {
+            begin_turn(&agent, &mut events, prompt).await;
+            expect_thinking(&mut events, reasoning).await;
+            expect_event(
+                &mut events,
+                CoreEvent::AssistantTextDelta {
+                    delta: answer.into(),
+                },
+            )
+            .await;
+            expect_event(&mut events, CoreEvent::TurnCompleted).await;
+        }
+        let requests = provider.0.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].items, vec![message(MessageRole::User, "U1")]);
+        assert_eq!(
+            requests[1].items,
+            vec![
+                message(MessageRole::User, "U1"),
+                message(MessageRole::Assistant, "A1"),
+                message(MessageRole::User, "U2")
+            ]
+        );
+        close_session(&agent, &mut events).await;
+    }
+
+    #[tokio::test]
+    async fn failed_thinking_keeps_completed_tools_but_not_partial_assistant_history() {
+        let call = crate::ToolCall {
+            call_id: "fixture-call".into(),
+            name: "fixture_missing_tool".into(),
+            arguments: serde_json::json!({}),
+        };
+        let result = crate::ToolResult {
+            call_id: call.call_id.clone(),
+            output: "unknown tool: fixture_missing_tool".into(),
+            is_error: true,
+        };
+        let provider = Arc::new(ThinkingFakeProvider::new(vec![
+            scripted(vec![
+                thinking("R1"),
+                Ok(ModelEvent::ToolCall { call: call.clone() }),
+                Ok(ModelEvent::Finished {
+                    reason: FinishReason::ToolCalls,
+                }),
+            ]),
+            scripted(vec![
+                thinking("R2"),
+                Err(ProviderError::Transport("fixture failure".into())),
+            ]),
+            scripted(vec![text("A"), stop()]),
+        ]));
+        let SessionConnection {
+            agent, mut events, ..
+        } = start_session(test_models(provider.clone()), ToolRegistry::empty());
+        begin_turn(&agent, &mut events, "U1").await;
+        expect_thinking(&mut events, "R1").await;
+        expect_event(
+            &mut events,
+            CoreEvent::ToolCallStarted { call: call.clone() },
+        )
+        .await;
+        expect_event(
+            &mut events,
+            CoreEvent::ToolCallFinished {
+                name: call.name.clone(),
+                result: result.clone(),
+            },
+        )
+        .await;
+        expect_event(&mut events, CoreEvent::ModelStepStarted { step: 2 }).await;
+        expect_thinking(&mut events, "R2").await;
+        assert!(
+            matches!(within(events.recv()).await, Some(CoreEvent::TurnFailed { message }) if message.contains("fixture failure"))
+        );
+
+        begin_turn(&agent, &mut events, "U2").await;
+        expect_event(
+            &mut events,
+            CoreEvent::AssistantTextDelta { delta: "A".into() },
+        )
+        .await;
+        expect_event(&mut events, CoreEvent::TurnCompleted).await;
+        let requests = provider.0.requests();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(
+            requests[2].items,
+            vec![
+                message(MessageRole::User, "U1"),
+                ConversationItem::ToolCall(call),
+                ConversationItem::ToolResult(result),
+                message(MessageRole::User, "U2")
+            ]
+        );
+        close_session(&agent, &mut events).await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_cancels_thinking_when_the_ui_queue_is_full() {
+        let (stream, sender, started, dropped) = controlled_stream();
+        let provider = Arc::new(ThinkingFakeProvider::new(vec![stream]));
+        let SessionConnection {
+            agent, mut events, ..
+        } = start_session(test_models(provider), ToolRegistry::empty());
+        begin_turn(&agent, &mut events, "fixture prompt").await;
+        within(started).await.unwrap();
+        let capacity = events.receiver.max_capacity();
+        for _ in 0..(capacity + 64) {
+            sender.send(thinking("R")).unwrap();
+        }
+        within(async {
+            while events.receiver.len() < capacity {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        within(agent.send(AgentCommand::Shutdown)).await.unwrap();
+        within(dropped).await.unwrap();
+        within(async { while events.recv().await.is_some() {} }).await;
+        assert!(sender.is_closed());
     }
 
     struct FakeProvider {

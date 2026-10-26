@@ -11,7 +11,8 @@ pub use conversation::{ConversationItem, MessageRole, SessionMessage};
 pub use model::{ModelFactory, ModelInfo, ModelManager, ModelSelectionError};
 pub use provider::{
     FinishReason, ModelEvent, ModelProvider, ModelRequest, ModelStream, ProviderError,
-    ThinkingCapabilities, ThinkingMode, ThinkingOptions,
+    ReasoningOutputPolicy, ThinkingCapabilities, ThinkingCapabilitiesOverride, ThinkingMode,
+    ThinkingOptions,
 };
 pub use session::{
     AgentCommand, AgentHandle, CoreEvent, CoreEventStream, SessionConnection, SessionError,

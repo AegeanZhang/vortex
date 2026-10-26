@@ -4,7 +4,7 @@
 `vortex-provider` 的边界。模型上下文未来如何裁剪和压缩，见
 [`message-building.md`](message-building.md)；TUI 如何消费 Session，见
 [`tui-interface.md`](tui-interface.md)。SSE 协议、Thinking 阶段和后续刷新策略见
-[`streaming-response.md`](streaming-response.md)；本文只描述阶段 A 的运行时契约，
+[`streaming-response.md`](streaming-response.md)；本文描述正文及展示-only 思考的运行时契约，
 实现与验收进度以根 [`README.md`](../../README.md) 为准。模型/工具交替执行的详细规则见
 [`agent-loop.md`](agent-loop.md)。
 
@@ -12,8 +12,8 @@
 
 Session runtime 负责保存对话事实、串行化命令、调度模型/工具并发布语义事件。它不知道
 HTTP、OpenAI wire format 或终端控件。每次只运行一个 Turn，Turn 内可以串行经历多个
-模型请求和工具调用，支持增量正文、空闲/失败时的会话内模型切换和整个 Session 关闭；
-不包含 Thinking 展示、保留会话的 Turn 取消、持久化或恢复。源码契约与完整验收不同，
+模型请求和工具调用，支持步骤/正文/思考事件、空闲/失败时的会话内模型切换和整个 Session 关闭；
+不包含思考历史回传、保留会话的 Turn 取消、持久化或恢复。源码契约与完整验收不同，
 模型切换专项测试仍需补齐。
 
 ```text
@@ -36,7 +36,7 @@ TUI <────────CoreEventStream───────── Session 
 
 | 类型 | 当前职责 |
 | --- | --- |
-| `ModelProvider` | `stream(ModelRequest)` 返回惰性 `ModelStream`，流元素为 `Result<ModelEvent, ProviderError>` |
+| `ModelProvider` | 返回惰性 `ModelStream`，另以 reasoning_output_policy 声明 Reject/DisplayOnly 消费策略 |
 | `ModelInfo` | 可安全显示的 profile ID、显示名、Provider/host、工具能力与不可选原因，不含凭据 |
 | `ModelFactory` | 返回模型目录，按 ID 本地构造 Provider；具体实现由 CLI 提供，不执行网络请求 |
 | `ModelManager` | 持有目录、当前模型和 Provider，构造成功后才原子替换绑定 |
@@ -48,11 +48,12 @@ TUI <────────CoreEventStream───────── Session 
 | `AgentHandle` | 可克隆的命令入口；业务命令走有界 channel，Shutdown 走独立 watch 信号 |
 | `CoreEventStream` | 单消费者事件入口；隐藏接收端实现 |
 | `AgentCommand` | `SubmitPrompt`、`SelectModel { model_id }` 和 `Shutdown` |
-| `CoreEvent` | 用户/Assistant、工具和 Turn 事件；普通拒绝与模型选择确认/拒绝分别表达 |
+| `CoreEvent` | 用户/Assistant、模型步骤、思考增量、工具和 Turn 事件；普通拒绝与模型选择确认/拒绝分别表达 |
 
 `start_session(ModelManager, ToolRegistry)` 创建容量为 32 的命令 channel 和容量为
 128 的事件 channel，并启动一个 Tokio task；每个 Turn 另建容量为 32 的 `TurnProgress`
-channel。无工具调用方使用 `ToolRegistry::empty()`；阶段 A 仍拒绝思考增量。
+channel。无工具调用方使用 `ToolRegistry::empty()`；思考是否可消费由本 Turn Provider
+的 Reject/DisplayOnly 策略决定，与注册表是否为空无关。
 初始 Snapshot 保存空消息、`Idle`、`models.current()` 与模型目录的副本；manager 本体随后
 移入 actor，后续变化通过事件通知。当前尚未实现历史恢复，因此这里还不承担恢复场景下
 “快照与订阅原子建立”的完整语义。
@@ -178,6 +179,8 @@ UI 消费者关闭；先得到 `RuntimeInput`，再更新状态，避免跨分�
 - 初始模型和目录先克隆到 snapshot；manager 的所有后续选择只能由 actor 串行处理。
 - `run_turn` 独占进度发送端，累积每个模型步骤的正文并维护本地 `context`；不直接修改
   Session 权威历史。工具步骤通过 ToolFinished 回填，最终回答通过 TurnOutput 返回。
+- 每次模型请求前发送 ModelStepStarted；按 Provider 输出策略转发思考增量。展示-only
+  思考不在 Session 累积，不进入 history 或 snapshot，事件发送仍监听 Shutdown。
 - actor 等进度通道排空并关闭，再 `join_next()` 回收任务；只有正常返回 `Ok(TurnOutput)`
   才提交最终 Assistant 并发布 TurnCompleted，任务错误或 panic 统一失败。
 - `Shutdown`、所有命令句柄关闭或事件消费者消失时，actor 中止活跃 task 并退出。
@@ -194,9 +197,11 @@ UI 消费者关闭；先得到 `RuntimeInput`，再更新状态，避免跨分�
 SubmitPrompt
   -> UserMessageAdded
   -> AssistantMessageStarted
-  -> run_turn：ModelProvider::stream
-  -> [AssistantTextDelta（可选前缀）
-      -> ToolCallStarted -> ToolCallFinished -> 再次 ModelProvider::stream]（零到多次）
+  -> ModelStepStarted(1) -> run_turn：ModelProvider::stream
+  -> [AssistantReasoningDelta（仅 DisplayOnly，可选）、AssistantTextDelta（可选前缀）
+      -> ToolCallStarted -> ToolCallFinished
+      -> ModelStepStarted(n+1) -> 再次 ModelProvider::stream]（零到多次）
+  -> AssistantReasoningDelta（仅 DisplayOnly，可选）
   -> AssistantTextDelta（最终回答，一次或多次）
   -> run_turn 返回，内部进度通道排空并关闭，task 正常结束
   -> TurnCompleted
@@ -211,8 +216,9 @@ Finished 是每个模型步骤的 Provider 事件，不直接发给 TUI。ToolCa
 最终 Assistant 只写入历史一次，不重发完整正文 Delta。
 
 Provider 错误、缺少终态、task 异常、Length、ContentFilter、空最终正文、工具轮数超限
-或非法调用 ID 均导致 Failed 和一次 TurnFailed。阶段 A 收到 ReasoningDelta 时，
-`run_turn` 返回协议错误并释放流；Session 排空已发送进度后统一收尾，不等远端生成完毕。
+或非法调用 ID 均导致 Failed 和一次 TurnFailed。Reject 策略收到 ReasoningDelta 或
+DisplayOnly 思考超过每步字节上限时，run_turn 失败并释放流；Session 排空已发送进度后
+统一收尾，不等远端生成完毕。只有思考而无最终正文也不能以 Stop 成功。
 未知工具、工具参数/执行错误则成为错误 ToolResult，交给下一步模型处理，不直接失败。
 
 本轮已接受的 User 及已完成的工具步骤保留，但失败模型步骤的部分 Assistant 不进入
@@ -226,12 +232,14 @@ Provider 错误、缺少终态、task 异常、Length、ContentFilter、空最�
 OpenAI-compatible Chat Completions 的 `user`、`assistant`、`system`，发送
 `stream: true`，将 SSE choice 0 的正文转换为 TextDelta，并组装单个完整 ToolCall。
 请求中的工具定义/调用/结果映射见 [Agent loop](agent-loop.md)。泛用构造器默认不发送思考控制参数；
-CLI 工厂将 Provider 的 api_flavor 与模型的 thinking/thinking_capabilities 装配为
+CLI 工厂将 Provider 的 api_flavor 与模型的 thinking、预设和能力覆盖装配为
 `OpenAiChatOptions`，先校验再读取 key。内置 Qwen 使用 DashScope 方言并显式关闭
 思考及思考历史；DeepSeek 官方使用独立字段，不能混用。具体转换见
 [思考选项设计](provider-thinking-options.md)。同 Provider 的不同模型不共用请求选项。
 工厂注入共享 Reqwest client，Core 不依赖其类型。
-仅改变思考开关不能完成 Thinking 接入。
+显式 Qwen Thinking 预设可装配 DisplayOnly，ProviderDefault/Disabled 则为 Reject。
+DeepSeek Enabled 尚未适配，不能只修改 TOML 开启。完整历史边界见
+[Thinking 展示](thinking-display.md)。
 
 Provider 负责 HTTP 状态、SSE Content-Type、分帧与 JSON 校验，并要求合法 `finish_reason`
 加 `[DONE]` 才产生 Finished。等待响应头上限为 30 秒，每次等待下一个 body chunk 的空闲
@@ -254,7 +262,9 @@ Provider 负责 HTTP 状态、SSE Content-Type、分帧与 JSON 校验，并要�
 | 同上 | Turn 运行中再次提交 | 第二条命令被拒绝，第一条仍可完成 |
 | 同上 | Provider 返回错误后重试 | 收到 `TurnFailed`；失败 User 保留、无失败 Assistant，随后可再次提交 |
 | 同上 | 缺少终态、异常结束、Length/ContentFilter 或空最终正文 | 发一次失败，不提交失败步骤的 Assistant |
-| 同上 | 阶段 A 收到 ReasoningDelta | run_turn 立即返回错误，释放流，不再读取后续正文 |
+| 同上 | Reject 收到 ReasoningDelta | run_turn 立即返回错误，释放流，不再读取后续正文 |
+| 同上 | DisplayOnly 思考流 | 步骤先于增量，思考先于流完成到达；下一轮历史不含思考 |
+| 同上 | Thinking 中失败/退出/满队列 | 保留已完成工具历史，失败 Assistant 不入历史；Shutdown 释放活跃流 |
 | 同上 | `Shutdown` 与背压 | 活跃流及阻塞的事件发送可被中断，事件流最终关闭 |
 | 同上 | 工具步骤后模型失败 | 保留完成的前缀/调用/结果，失败部分正文不入历史 |
 | 同上 | 空闲/Failed 切换后再提交 | 下一轮使用新 Provider，历史只带一次，不新增 slash 消息 |
@@ -273,6 +283,6 @@ Provider 负责 HTTP 状态、SSE Content-Type、分帧与 JSON 校验，并要�
 
 ## 后续演进
 
-Thinking 需要增加 Core 的思考事件及 TUI 投影；思考历史还需单独扩展消息结构，具体规则
+Thinking 展示已通过 Core 事件投影到 TUI，思考历史仍需单独扩展消息结构，具体规则
 见流式响应设计。CancelTurn、恢复历史、工具详情/审批事件等仍应先扩展 Core
 契约，再由 CLI 或 TUI 使用，不能把厂商响应或界面状态塞进 `CoreEvent`。

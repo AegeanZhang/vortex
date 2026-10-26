@@ -32,9 +32,9 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：实现 config、HOME/日志入口迁移、`-m/-c` 或 `/model` 时；正式契约优先于本地实施稿。
 
-- [`design/provider-thinking-options.md`](design/provider-thinking-options.md) —— 已实现的通用思考策略、模型能力、接口方言、CLI 装配和千问/DeepSeek 关闭参数；包含离线测试与旧预设迁移边界，不代表已支持思考内容。
+- [`design/provider-thinking-options.md`](design/provider-thinking-options.md) —— 思考策略、方言、显式能力预设与可选覆盖；请求字段、输出策略和独立历史契约的装配规则。
 
-  **什么时候查**：重构厂商请求选项，或需要显式关闭某个服务的思考模式时。
+  **什么时候查**：装配厂商请求选项、开启 Qwen Thinking，或诊断某个 profile 不可用时。
 
 理解工具版 TUI 时，建议依次阅读 `session-runtime.md`、`agent-loop.md`、
 `streaming-response.md`、`tui-interface.md` 和 `message-building.md`：先看调度与工具循环，
@@ -52,9 +52,13 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：阅读 `vortex-core`、排查 TUI 为何收到某个事件，或补充 Session/Provider 测试时。
 
-- [`design/streaming-response.md`](design/streaming-response.md) —— SSE 增量接口与任务终态，以及后续 Thinking 展示/历史策略和绘制节流。
+- [`design/streaming-response.md`](design/streaming-response.md) —— SSE 增量、步骤/思考事件和任务终态，以及后续思考历史策略与绘制节流。
 
   **什么时候查**：理解流式 Provider、增加思考显示或验证流中断与退出时。
+
+- [`design/thinking-display.md`](design/thinking-display.md) —— 当前 Thinking 展示 v1：Qwen 预设与展示-only 历史边界、请求/消费策略、模型步骤、TUI 投影及离线/人工验收边界。
+
+  **什么时候查**：准备开启思考、传递 ReasoningDelta 或实现思考与正文分区时；不代表已支持 DeepSeek 工具思考回传。
 
 - [`design/agent-loop.md`](design/agent-loop.md) —— 工具版 v1 的 Tool/Registry、历史回填、ID/轮数限制、秘塔/Mock 搜索、工作区目录列表与阻塞取消边界及测试契约。
 

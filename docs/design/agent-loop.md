@@ -27,6 +27,9 @@ Mock v1 是最初的闭环基线；当前 bootstrap 总是先注册 `list_direct
 `requires_tools`，统一用于模型列表的不可用原因与实例创建前校验。当前 TUI 始终有目录
 工具，因此即使关闭搜索，所选模型仍须声明支持工具调用。
 仍不实现并行工具、审批、沙箱、通用 JSON Schema 校验、注册表统一超时或总 Token 预算。
+单次模型响应的多工具调用同样不受支持，即使未来按顺序执行也需另改协议与历史映射。
+当前未发送 parallel_tool_calls=false；真实 Qwen Thinking 搜索遇到该限制的记录见
+[Issue #3](https://github.com/AegeanZhang/vortex/issues/3)，与四次工具调用预算不同。
 秘塔工具单独实现参数校验、请求超时与输出限制；不能把这些推断为所有 Tool 都已受治理。
 
 ## 工具接口与注册表
@@ -191,19 +194,24 @@ CLI 在进入 TUI 前，通过 `spawn_blocking` 将启动时 `AppPaths.cwd` 打�
 ## 多步执行与历史
 
 ```text
-User → ModelRequest(items, tools)
+User → ModelStepStarted(1) → ModelRequest(items, tools)
+     → ReasoningDelta*（仅 DisplayOnly）、TextDelta*（可选前缀）
      → ToolCall + Finished(ToolCalls)
      → ToolStarted → ToolRegistry::execute → ToolFinished
      → 回填 Assistant 前缀（如有）、ToolCall、ToolResult
-     → 再次 ModelRequest
-     → TextDelta… + Finished(Stop)
+     → ModelStepStarted(2) → 再次 ModelRequest
+     → ReasoningDelta*（仅 DisplayOnly）、TextDelta… + Finished(Stop)
      → TurnOutput → Session 提交最终 Assistant → TurnCompleted
 ```
 
 `run_turn(provider, tools, history, progress)` 返回 `Result<TurnOutput, TurnError>`。
 它拥有权威历史的副本 `context`，每个模型步骤构造 `ModelRequest { items, tools }`。
-模型正文一边累积、一边作为 `TurnProgress::TextDelta` 发给 Session；思考增量在阶段 A
-直接返回协议错误。每一步必须有结束事件，不能把 EOF 当作成功。
+每次请求前发布 ModelStepStarted，步骤从 1 开始。模型正文一边累积、一边作为
+`TurnProgress::TextDelta` 发给 Session。Provider 的 reasoning_output_policy 在本 Turn
+开始时读取一次：Reject 收到思考即失败；DisplayOnly 只计字节并转发独立思考增量，
+不写 Assistant 前缀、最终回答或请求历史。每模型步骤上限 256 KiB UTF-8 字节，超限
+增量不发布并使 Turn 失败；新步骤重新计数，详见 [Thinking 展示](thinking-display.md)。
+每一步必须有结束事件，不能把 EOF 当作成功；只有思考、没有最终正文的 Stop 也失败。
 
 - `ToolCalls`：要求恰好一个调用，校验轮数和 ID 后才执行工具；结果包括错误结果均回填，
   再次调用模型。当前步骤的非空 Assistant 前缀随调用/结果一起提交给 Session。

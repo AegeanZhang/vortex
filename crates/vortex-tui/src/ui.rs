@@ -128,6 +128,56 @@ mod tests {
     }
 
     #[test]
+    fn core_events_render_plain_thinking_and_markdown_answer_as_separate_sections() {
+        use crate::{action::UiAction, app::update};
+        use vortex_core::CoreEvent;
+
+        let mut state = AppState::default();
+        for event in [
+            CoreEvent::AssistantMessageStarted,
+            CoreEvent::ModelStepStarted { step: 1 },
+            CoreEvent::AssistantReasoningDelta {
+                delta: "**literal thought**".into(),
+            },
+            CoreEvent::AssistantTextDelta {
+                delta: "**answer**".into(),
+            },
+            CoreEvent::CommandRejected {
+                message: "busy".into(),
+            },
+        ] {
+            update(&mut state, UiAction::CoreEvent(event));
+        }
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| render(frame, &mut state)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let rows: Vec<String> = (0..24)
+            .map(|y| (0..80).map(|x| buffer[(x, y)].symbol()).collect())
+            .collect();
+        let thinking = rows
+            .iter()
+            .position(|line| line.contains("Thinking:"))
+            .unwrap();
+        let reasoning = rows
+            .iter()
+            .position(|line| line.contains("**literal thought**"))
+            .unwrap();
+        let answer = rows
+            .iter()
+            .position(|line| line.contains("answer"))
+            .unwrap();
+        assert!(thinking < reasoning && reasoning < answer);
+        assert!(!rows.iter().any(|line| line.contains("**answer**")));
+        // TestBackend 的双宽字符后带有占位单元格，比较文字时去掉这些空格。
+        assert!(rows[20].replace(' ', "").contains("回答中"));
+        assert!(rows[20].contains("busy"));
+        assert_eq!(
+            buffer[(1, reasoning as u16)].fg,
+            ratatui::style::Color::DarkGray
+        );
+    }
+
+    #[test]
     fn menu_rect_is_bounded_and_tiny_areas_are_skipped() {
         let main = Rect::new(0, 3, 80, 17);
         let prompt = Rect::new(0, 21, 80, 3);
