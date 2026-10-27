@@ -1,6 +1,9 @@
 # Message 与上下文构建设计
 
-本文档定义 Vortex 在调用模型前如何从会话事件构建消息与上下文，以及 Provider 如何把内部模型转换为具体 API 请求。架构边界见 [`../architecture/overview.md`](../architecture/overview.md)，术语见 [`../architecture/glossary.md`](../architecture/glossary.md)。
+架构归属：Turn 执行与历史构建。状态：当前最小模型与后续上下文目标分节说明。源码入口：[conversation.rs](../../../crates/vortex-core/src/conversation.rs)、[agent_loop.rs](../../../crates/vortex-core/src/agent_loop.rs)。
+详见 [逻辑模块](../../architecture/logical-modules.md)；实现与验证结果以根 [README](../../../README.md) 为准。
+
+本文档定义 Vortex 在调用模型前如何从会话事件构建消息与上下文，以及 Provider 如何把内部模型转换为具体 API 请求。架构边界见 [`../../architecture/overview.md`](../../architecture/overview.md)，术语见 [`../../architecture/glossary.md`](../../architecture/glossary.md)。
 
 ## 目标与边界
 
@@ -124,7 +127,7 @@ pub enum ContentPart {
 不尝试获取 API 未公开的隐藏推理，也不从普通回答中伪造思考过程。Provider 明确提供的
 可展示思考文本/摘要与最终回答分开保存；是否回传由模型能力和显式策略决定，不一律丢弃，
 也不拼进普通 `content`。需要签名或 opaque token 的协议以后单独建模，不能用一段字符串
-假装兼容。首版千问的字段与阶段边界见 [`streaming-response.md`](streaming-response.md)。
+假装兼容。首版千问的字段与阶段边界见 [`../provider/streaming-response.md`](../provider/streaming-response.md)。
 回传的思考需要纳入 Token 预算；未来裁剪时随对应 Assistant 原子移除，不能单独打乱。
 日志默认不记录思考、Prompt 或回答正文；诊断输出规则见该设计的安全章节。
 
@@ -196,7 +199,7 @@ pub trait TokenEstimator {
 - 同一个 Tool call 最多接受一个终态结果；取消、超时和执行错误也表示为 `is_error = true` 的结果。
 - 工具参数保持结构化 JSON，并在执行前按 Tool 的 JSON Schema 校验。
 - Tool 输出属于不可信数据，始终保持为 `ToolResult`；其中即使包含“忽略之前指令”等文本，也不能改变 Instruction 层级。
-- 日志、错误和调试快照不得包含 API 密钥或认证头；凭据规则见 [`credentials.md`](credentials.md)。
+- 日志、错误和调试快照不得包含 API 密钥或认证头；凭据规则见 [`../cross-cutting/credentials.md`](../cross-cutting/credentials.md)。
 - 截断不能破坏 UTF-8，也不能让输出看起来像完整内容；必须附加机器可识别的截断元数据或明确文本标记。
 
 ## Provider 映射
@@ -252,3 +255,23 @@ Adapter 不得重新排序历史、擅自裁剪内容或把 Tool result 改写�
 5. 多 Provider：分别实现协议 adapter 与固定请求 fixture。
 
 每一阶段都应先完成核心构建测试，再接入 CLI 或 TUI；UI 不参与消息选择和上下文裁剪。
+
+## 思考历史扩展（目标）
+
+下述为原流式设计中的未来目标，当前展示-only 不持久化或回传思考。
+阶段 A/B 分别表示文本/工具流与展示-only，阶段 C 表示需要独立适配的思考历史：
+
+成功时只把缓冲写入历史一次，不再次发整段 TextDelta。Thinking 不是新 MessageRole，
+不能将其并入回答。未来阶段 C 可扩展 `SessionMessage.reasoning: Option<String>`；User/System
+为 None，成功 Assistant 独立保留。Snapshot 必须同步投影，不因恢复丢失该字段。
+上述是普通文本消息的历史目标，不足以单独满足工具思考协议：工具步骤的 Assistant
+reasoning、正文和 ToolCall 也须保持关联。DeepSeek 等接入的完整回传另行设计，不能
+仅给最终回答增加 reasoning 字段就宣称已实现阶段 C。
+
+阶段 C 仅支持本会话、同一模型的可展示/可回传文本。跨 Provider 的摘要、签名和 opaque
+reasoning item 不是同一种数据；未来 `/model` 必须做能力检查和明确转换/拒绝策略，不能
+把千问字段照搬到其他服务。API 没返回思考时只显示等待状态，不能补造思考文本。
+
+未来 Snapshot 和历史模型的扩展测试应检查第二轮独立 reasoning、User/System 无思考字段、
+工具步骤关联、跨 Provider 转换或拒绝及日志不落正文。不能直接将现有 CoreEvent 序列化
+为恢复协议，也不因未来目标出现过 preserve_thinking=true 就将其开放为当前配置。

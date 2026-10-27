@@ -1,14 +1,26 @@
 # vortex 命令行接口设计
 
+架构归属：应用入口与装配。状态：当前接口与未来目标分节说明。源码入口：[main.rs](../../../crates/vortex-cli/src/main.rs)。
+详见 [逻辑模块](../../architecture/logical-modules.md)；实现与验证结果以根 [README](../../../README.md) 为准。
+
 本文档定义 `vortex` 二进制对外的**目标接口**：支持哪些模式、有哪些参数、输出与退出码的契约。它是兼容性承诺的依据，因此参数命名一次定清楚，实现则分阶段推进。
 
-架构层面的 crate 划分见 `../architecture/overview.md`；当前实现进度见仓库根目录的 `README.md`。本文档中若干取舍的依据见 `../research/cli-design-research.md`（Claude Code 与 Codex CLI 的接口对照）。
+架构层面的 crate 划分见 `../../architecture/overview.md`；当前实现进度见仓库根目录的 `README.md`。本文档中若干取舍的依据见 `../../research/cli-design-research.md`（Claude Code 与 Codex CLI 的接口对照）。
+
+## 当前接口
+
+当前已实现裸 vortex 启动 TUI、exec <TASK>、-m/--model、可重复 -c/--config、
+布尔 -v/--verbose，以及 clap 的 help/version。-m/-c 仅接入 TUI，exec 收到它们会报错；
+-v 不是累加计数。旧 exec 是独立非流式 HTTP，TASK="-" 当前没有读取 stdin 的特殊语义。
+
+下文命令结构、全局参数、输出和退出码描述目标接口；resume、审批/沙箱、JSON 输出、
+颜色和 quiet 等未实现，不能把目标参数表当作当前 --help。启动装配见 [启动设计](startup.md)。
 
 ## 设计前提
 
 三条来自 `README.md` 与 `AGENTS.md`、直接约束了本设计的约定：
 
-- 当前认证只支持环境变量 API Key，密钥值不得写入配置文件，因此本轮不实现 `vortex login` 或凭据管理。OAuth 并非技术上必须落盘；若以后接入订阅认证，需要先独立设计授权与存储策略，见 [凭据设计](credentials.md)。
+- 当前认证只支持环境变量 API Key，密钥值不得写入配置文件，因此本轮不实现 `vortex login` 或凭据管理。OAuth 并非技术上必须落盘；若以后接入订阅认证，需要先独立设计授权与存储策略，见 [凭据设计](../cross-cutting/credentials.md)。
 - 非交互模式遇到需要审批的操作时应安全失败。因此退出码必须能区分"任务失败"与"因无人审批而未执行"。
 - 被脚本、CI 和其他程序调用是一等场景，不是附带能力。因此事件流输出、stdin 输入与退出码语义属于首版接口的一部分，而非后补。
 
@@ -61,7 +73,7 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 
 ### 安装与配置的首版接入
 
-[安装设计](installation.md) 定义独立于二进制位置的统一 `.vortex` HOME，CLI 一次解析目录并交给日志与配置加载；[配置设计](configuration.md) 定义内置/用户/受限项目/CLI 的覆盖顺序、错误行为和来源诊断。项目文件只检查启动 cwd，不自动寻找 Git 根或加载父目录配置。
+[安装设计](installation.md) 定义独立于二进制位置的统一 `.vortex` HOME，CLI 一次解析目录并交给日志与配置加载；[配置设计](../configuration/configuration.md) 定义内置/用户/受限项目/CLI 的覆盖顺序、错误行为和来源诊断。项目文件只检查启动 cwd，不自动寻找 Git 根或加载父目录配置。
 
 当前配置已接入 TUI：`-m` 选择模型 profile（不是临时服务端模型名），`-c` 可重复且只接受
 配置设计的白名单，字符串值使用 TOML 引号；重复覆盖后再应用 `-m`。旧 exec 收到任意
@@ -108,7 +120,7 @@ vortex [GLOBAL OPTIONS] [SUBCOMMAND]
 ## 分阶段落地
 
 以下阶段是目标能力分组，不是当前实现清单；实现顺序可按学习需要调整，crate 边界以
-[`架构总览`](../architecture/overview.md) 为准。当前 TUI 已复用 Session 与工具循环，并注册秘塔网页搜索，
+[`架构总览`](../../architecture/overview.md) 为准。当前 TUI 已复用 Session 与工具循环，并注册秘塔网页搜索，
 exec 仍是旧非流式 HTTP 路径，不能从下表推断其已经具备工具、stdin 或 JSON 事件能力。
 
 | 阶段 | 本文档中落地的部分 |
@@ -118,7 +130,7 @@ exec 仍是旧非流式 HTTP 路径，不能从下表推断其已经具备工具
 | 3 交互 | 默认 TUI、`resume` 全部形态、`--last` / `--list`、`--color` 开关、退出码 130 |
 
 参数命名与语义按本文档的最终形态定义，不能从目标表推断当前全部可用。已接入的
-`-m/-c` 只适用于 TUI；旧 exec 明确拒绝。运行入口与验证限制见 [上手指南](../guide/getting-started.md)。
+`-m/-c` 只适用于 TUI；旧 exec 明确拒绝。运行入口与验证限制见 [上手指南](../../guide/getting-started.md)。
 
 ## 测试要求
 
@@ -150,4 +162,4 @@ exec 仍是旧非流式 HTTP 路径，不能从下表推断其已经具备工具
 | 仅 `-y` 与 `--no-sandbox` | 将分级安全策略压成布尔值，与"越界操作由用户按需审批"的分级设想不符 |
 | 无子命令、模式用 flag 区分 | 三种模式的专属参数挤在同一平面，互斥关系只能在运行时校验，`--help` 迅速变得难读 |
 | `exec` 作为隐式默认子命令 | 位置参数与子命令同层产生真实歧义，且新增子命令会追溯性改变旧命令含义 |
-| `vortex login` 等密钥管理子命令 | 与"API 密钥只能来自环境变量、不得写入配置文件"的安全约束冲突 |
+| 本轮实现 `vortex login` 等密钥管理子命令 | 当前仅支持环境 API key；登录、令牌刷新与安全存储须另立设计，不表示 OAuth 必须落盘或天然违反凭据约束 |

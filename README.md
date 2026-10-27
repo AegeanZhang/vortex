@@ -13,7 +13,7 @@ Transcript 已接入 Assistant Markdown、键盘翻页与鼠标滚轮；已补 T
 长中文滚动和窗口大小变化的离线回归，滑块视觉断裂问题暂缓处理。默认 Qwen profile
 仍显式关闭思考及思考历史；独立 Qwen Thinking profile 可通过显式预设开启展示-only
 思考，按模型步骤显示且不回填模型历史。DeepSeek 开启思考尚未接入。
-契约与限制见 [`Thinking 展示设计`](docs/design/thinking-display.md)。
+契约与限制见 [`Thinking 展示设计`](docs/design/tui/thinking-display.md)。
 Shutdown 可通知 Session 中止活跃流，但尚无保留会话的 `CancelTurn`；exec 未迁移到流式链路。
 
 Slash 支持 `/exit`、`/model` 与 `/model <profile-id>`：草稿首字符为 `/` 时显示根命令菜单，
@@ -24,12 +24,12 @@ Tab 只补全；`/mo` 按 Enter 先补为 `/model`，再次按 Enter 打开独�
 关闭窗口后仍可提交 `/exit`；完整 `/exit` 在 Idle/Running/Failed 均复用 Shutdown → Exit。
 未知命令、非法参数和多行 slash 不发送给模型；普通 Prompt 在已知 Running 状态下保留草稿。
 Resize 主动重绘，按键 Release 与确认键 Repeat 已过滤；Paste、动态多行高度及更多命令
-仍未实现。完整契约见 [`TUI 接口设计`](docs/design/tui-interface.md#slash-命令与菜单)。
+仍未实现。完整契约见 [`TUI 接口设计`](docs/design/tui/interface.md#slash-命令与菜单)。
 
 工具版 v1 每个模型步骤只接受一个调用，一个 Turn 最多执行 4 次工具调用；第五次会失败。
 工具错误作为 `is_error = true` 的结果回填给模型，空白或重复调用 ID 则直接使 Turn 失败。
 TUI 仅用状态栏展示工具开始/完成，不显示工具卡片或来源引用。设计见
-[`Agent loop 与内置工具`](docs/design/agent-loop.md)。秘塔工具已实现参数校验、超时和
+[Agent loop](docs/design/runtime/agent-loop.md) 与 [网页搜索设计](docs/design/tools/web-search.md)。秘塔工具已实现参数校验、超时和
 响应/输出大小限制，但注册表尚无通用 Schema 校验、工具超时或预算治理。
 思考历史回传、会话恢复、网页正文读取、MCP 和沙箱仍未实现。
 
@@ -156,7 +156,7 @@ TUI 配置优先级为内置默认值 → 用户 `<vortex-home>/config.toml` →
 Provider profile 定义连接、接口方言与密钥变量名，模型 profile 定义服务端模型、能力和请求选项。
 thinking.mode 支持 provider-default（省略参数，不等于关闭）、disabled，以及显式预设
 支持的 enabled。关闭要求声明能力且方言能够表达；当前开启仅支持 DashScope Qwen 的
-展示-only 预设，不通用于其他模型或接入。详见 [思考选项设计](docs/design/provider-thinking-options.md)。
+展示-only 预设，不通用于其他模型或接入。详见 [思考选项设计](docs/design/provider/thinking-options.md)。
 只读取选中模型的 key；搜索关闭或 Mock 不读搜索 key，秘塔缺 key 不回退 Mock。
 搜索开关仅控制 `web_search`，目录工具始终注册，没有新增 files 配置；当前 TUI 即使
 关闭搜索也要求所选模型声明支持工具调用。模型列表与创建入口使用实际注册表的同一能力要求。
@@ -166,7 +166,7 @@ thinking.mode 支持 provider-default（省略参数，不等于关闭）、disa
 搜索查询会发送给秘塔，工具结果再回填当前模型，两个服务可能分别计费；目录列表也会
 发送给当前模型供应商，只读不等于没有外发风险。不要把密钥或私有仓库内容放进查询。
 非交互模式遇到需要审批的操作时应安全失败，除非
-用户显式选择相应权限策略。配置示例与边界见 [配置设计](docs/design/configuration.md)。
+用户显式选择相应权限策略。配置示例与边界见 [配置设计](docs/design/configuration/configuration.md)。
 
 ## 常用命令
 

@@ -6,8 +6,8 @@
 - 源码补充：2026-10-21，只读核对用户提供的 Claude Code 历史快照，区分云端 WebSearch 与本地 Grep/Glob；未运行快照或调用真实搜索，见 §3.4 的快照核对
 - 范围：Agent Web Search 的执行形态、国内外服务候选、可靠性与安全边界
 - 定位：保留实现前调研与候选建议；后续接入状态单独注明，以设计文档和根 README 为准
-- 关联设计：[`Message 与上下文构建`](../design/message-building.md)、[`Session Runtime`](../design/session-runtime.md)
-- 后续执行契约：[`Agent loop 与内置工具`](../design/agent-loop.md)
+- 关联设计：[`Message 与上下文构建`](../design/runtime/message-building.md)、[`Session Runtime`](../design/runtime/session-runtime.md)
+- 后续执行契约：[Agent loop](../design/runtime/agent-loop.md)、[网页搜索工具](../design/tools/web-search.md)
 - 关联架构：[`架构总览`](../architecture/overview.md)、[`关键依赖与技术选型`](../architecture/technology-stack.md)
 
 本文保留 2026-09-27 调研时的基线与候选建议，“当前一次 Prompt 对应一次模型流”等描述
@@ -494,7 +494,7 @@ Content-Type: application/json
   未由 Agent 再次调用真实 API，也未收到脱敏响应、扣费或大陆无代理记录。
 - 不要求重复正常路径才能继续开发。后续回归应补空结果、认证/限流、超时、响应过大、
   退出取消与预算限制；可保存一份脱敏成功样本作为离线 fixture，避免默认测试消耗额度。
-- 请求与输出边界见 [搜索工具设计](../design/agent-loop.md)，最新验证状态见
+- 请求与输出边界见 [搜索工具设计](../design/tools/web-search.md)，最新验证状态见
   [根 README](../../README.md)。通用 `WebSearchBackend` 与来源引用验证仍未实现。
 
 ### 5.6 中国大陆直连、代理与候选优先级（2026-10-02 补充）

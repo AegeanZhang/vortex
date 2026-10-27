@@ -2,7 +2,7 @@
 
 - 调研日期：2026-09-01
 - 适用项目：Vortex CLI Agent
-- 状态：已采纳，对应设计见 `docs/design/credentials.md`
+- 状态：已采纳，对应设计见 `docs/design/cross-cutting/credentials.md`
 - 调研对象版本：Claude Code 2.1.251（本机 `--help`）、Codex 官方配置与认证文档
 
 ## 方法与可信度
@@ -76,7 +76,7 @@ printenv OPENAI_API_KEY | codex login --with-api-key
 1. **密钥不写进项目配置文件** —— 两个参照物都遵守。项目配置会被提交、被 review、被同步，写入密钥等于泄露。这是通用安全底线。
 2. **密钥完全不落盘** —— 两个参照物都**不**遵守。它们把凭据放进系统钥匙串或受保护的用户级文件，只是不放在工作区里。
 
-Vortex 现有文档（`README.md`、`AGENTS.md`、`docs/design/cli-surface.md`）将两者表述为一句"API 密钥只能从环境变量读取"，实际执行的是更严格的第 2 条。
+Vortex 现有文档（`README.md`、`AGENTS.md`、`docs/design/application/cli-surface.md`）将两者表述为一句"API 密钥只能从环境变量读取"，实际执行的是更严格的第 2 条。
 
 该选择本身自洽——约束在设计之前就已确立——但代价需要记录：**OAuth 订阅登录依赖凭据落盘**，Codex 的 ChatGPT 登录与 Claude Code 的 OAuth 都是如此。只要 Vortex 仅使用 API key，代价为零；若将来要接订阅账号，这条约束必须重新评估。
 

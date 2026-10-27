@@ -21,8 +21,8 @@ cargo build --release --locked
 - TUI 需要测试状态机，并人工验证正常退出、错误和 panic 后终端恢复原始模式。
 - 编程语言练习在独立项目维护，产品测试不得依赖个人学习项目。
 
-Session、工具和流式协议的场景矩阵分别见 [Session](../design/session-runtime.md)、
-[Agent loop](../design/agent-loop.md) 和 [SSE](../design/streaming-response.md)。矩阵是
+Session、工具和流式协议的场景矩阵分别见 [Session](../design/runtime/session-runtime.md)、
+[Agent loop](../design/runtime/agent-loop.md) 和 [SSE](../design/provider/streaming-response.md)。矩阵是
 测试要求，不代表覆盖已完成；实际测试数量和检查结果只在根 README 记录。
 
 受控 FakeProvider/Stream、背压同步、本地 HTTP server 与秘塔异常场景的具体方法见

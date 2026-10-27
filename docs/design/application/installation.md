@@ -1,6 +1,9 @@
 # 安装与运行目录设计
 
-本文定义 Vortex 的安装边界、用户 HOME 和跨平台运行目录；配置内容与加载规则见 [配置设计](configuration.md)。CLI 已通过 AppPaths 统一解析默认 HOME、cwd、配置和日志路径；安装器、自更新及跨平台验收仍是后续工作。接口已接入不代表路径/权限专项测试完成，当前验证边界见根 README，运行入口见 [上手指南](../guide/getting-started.md)。
+架构归属：应用入口与装配。状态：当前路径契约与目标安装方式分节说明。源码入口：[paths.rs](../../../crates/vortex-cli/src/paths.rs)。
+详见 [逻辑模块](../../architecture/logical-modules.md)；实现与验证结果以根 [README](../../../README.md) 为准。
+
+本文定义 Vortex 的安装边界、用户 HOME 和跨平台运行目录；配置内容与加载规则见 [配置设计](../configuration/configuration.md)。CLI 已通过 AppPaths 统一解析默认 HOME、cwd、配置和日志路径；安装器、自更新及跨平台验收仍是后续工作。接口已接入不代表路径/权限专项测试完成，当前验证边界见根 README，运行入口见 [上手指南](../../guide/getting-started.md)。
 
 ## 1. 安装入口、程序包与用户 HOME
 
@@ -66,7 +69,7 @@ Vortex HOME 不等于操作系统 HOME，不得为改变 Vortex 路径而改写�
 - `sessions/`、`state/`、`cache/` 尚未接入时不创建空目录，不用目录存在来表示功能完成。
 - 配置和会话应可独立备份；删除缓存不能删除会话，清理日志不能递归删除 HOME。
 - 更改 HOME 不自动搬迁旧数据；已有开发脚本仍可显式使用原目录，迁移需另行执行。
-- 首版不在 HOME 中创建凭据文件，密钥规则见 [凭据设计](credentials.md)。
+- 首版不在 HOME 中创建凭据文件，密钥规则见 [凭据设计](../cross-cutting/credentials.md)。
 
 ## 4. 工作目录与项目配置
 
@@ -80,7 +83,7 @@ Vortex HOME 不等于操作系统 HOME，不得为改变 Vortex 路径而改写�
 
 例如 `demo/.vortex/project.toml` 存在，但从 `demo/src` 启动：只检查 `demo/src/.vortex/project.toml`。需要使用 demo 的配置时，先在 demo 启动；首版不为此新增目录切换参数。
 
-启动诊断应同时给出 cwd、用户配置检查路径及项目配置检查路径，并区分“已加载”与“文件不存在”。不要只显示最终模型而隐藏配置来源；具体输出规则见 [配置设计](configuration.md#6-配置来源与可观测性)。
+启动诊断应同时给出 cwd、用户配置检查路径及项目配置检查路径，并区分“已加载”与“文件不存在”。不要只显示最终模型而隐藏配置来源；具体输出规则见 [配置设计](../configuration/configuration.md#6-配置来源与可观测性)。
 
 ## 5. 跨平台路径、权限与安全
 

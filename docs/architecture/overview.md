@@ -81,9 +81,9 @@ TUI 的 Transcript、当前模型标签和响应阶段均为展示状态。`Core
 - 并发：一个 Session 同时只接受一个活跃 Turn；TUI loop、Session actor 和 Turn task
   通过有界通道协作，不意味着各自占用独立线程。
 - 错误：底层类型化错误逐层返回，Turn 失败映射为事件，TUI/CLI 负责呈现。
-  完整稳定退出码仍是 [CLI 目标设计](../design/cli-surface.md)，不是现有统一实现。
+  完整稳定退出码仍是 [CLI 目标设计](../design/application/cli-surface.md)，不是现有统一实现。
 - 凭据与日志：密钥来自进程环境，CLI 初始化文件日志；程序不自动加载 `.env`。
-  密钥、完整请求和思考不应进入普通日志，脱敏 Debug 不替代逐个日志点审查，见 [凭据设计](../design/credentials.md)。
+  密钥、完整请求和思考不应进入普通日志，脱敏 Debug 不替代逐个日志点审查，见 [凭据设计](../design/cross-cutting/credentials.md)。
 - 工作区：目录工具根固定为启动 cwd，逐层拒绝链接且限制扫描/输出；这些边界不等于
   workspace trust、秘密检测、审批或 OS 沙箱。搜索与模型请求当前可访问网络。
 - 取消：Shutdown 使用独立信号打断会话等待与事件背压；已开始的 `spawn_blocking`

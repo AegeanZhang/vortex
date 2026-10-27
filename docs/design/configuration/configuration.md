@@ -1,10 +1,13 @@
 # 配置模块产品设计
 
-本文定义已接入的模型与搜索配置首版契约，是实施稿的依据；运行目录见 [安装设计](installation.md)，密钥处理见 [凭据设计](credentials.md)。CLI/Core/TUI 已接通 TOML、默认用户 HOME、`-m/-c` 与 `/model`。思考选项的配置、装配和请求 JSON 已补离线测试；完整配置优先级、路径与 TUI 切换专项及真实交互验收仍未完成，验证结果以根 README 为准。下文验收要求不是通过记录。
+架构归属：配置管理。状态：当前实现契约。源码入口：[config.rs](../../../crates/vortex-core/src/config.rs)。
+详见 [逻辑模块](../../architecture/logical-modules.md)；实现与验证结果以根 [README](../../../README.md) 为准。
+
+本文定义已接入的模型与搜索配置首版契约，是实施稿的依据；运行目录见 [安装设计](../application/installation.md)，密钥处理见 [凭据设计](../cross-cutting/credentials.md)。CLI/Core/TUI 已接通 TOML、默认用户 HOME、`-m/-c` 与 `/model`。思考选项的配置、装配和请求 JSON 已补离线测试；完整配置优先级、路径与 TUI 切换专项及真实交互验收仍未完成，验证结果以根 README 为准。下文验收要求不是通过记录。
 
 Thinking 预设、可选覆盖及显式 Enabled 的配置已接入；当前仅开放指定 DashScope Qwen
 展示-only 接入，DeepSeek 开启思考尚未适配。用法见第 3 节，消费与历史边界见
-[Thinking 展示设计](thinking-display.md)。
+[Thinking 展示设计](../tui/thinking-display.md)。
 
 ## 1. 目标与职责
 
@@ -78,7 +81,7 @@ Provider 定义协议、接口方言、地址和凭据变量名；模型 profile
 CLI 将方言、策略和能力装配为 `OpenAiChatOptions`，Provider 校验并转换成厂商字段。
 上例发送 `enable_thinking=false`、`preserve_thinking=false`，不启用 Thinking 内容处理。
 `provider-default` 省略参数，不等于关闭思考；Core 不依赖厂商 DTO，不按模型名猜测能力。
-`request_options` 旧字段已拒绝，新字段与迁移规则见 [思考选项装配设计](provider-thinking-options.md)。
+`request_options` 旧字段已拒绝，新字段与迁移规则见 [思考选项装配设计](../provider/thinking-options.md)。
 
 `openai-chat` 明确表示 Chat Completions 协议，并使用现有 SSE/工具调用语义。仅支持 Responses 或 Anthropic Messages 的服务不能仅靠改地址接入；不支持的 kind 明确报错。
 
@@ -123,7 +126,7 @@ Some(false) 覆盖 true；最终运行时能力仍为 bool。无预设时从全 
 能力覆盖不接受 history_policy，也不能使尚未适配的接入支持展示。即使三个 bool 全 true，
 无独立历史契约的 Enabled 仍拒绝；supports_history_control 不证明工具步骤可省略回传。
 项目文件和 -c 白名单不增加预设、能力或历史字段。完整契约见
-[Provider 选项第 8 节](provider-thinking-options.md#8-能力预设与覆盖)。
+[Provider 选项第 8 节](../provider/thinking-options.md#8-能力预设与覆盖)。
 
 保存后重启，并用 `-m qwen-thinking` 或 `/model qwen-thinking` 选择该 profile；新增条目
 不会自动改变 default_model。界面中思考以纯文本单独显示，正文仍按 Markdown 渲染。
@@ -141,7 +144,7 @@ ProviderDefault 不发送控制参数，但当前输出策略仍为 Reject，不
 搜索开关只控制 `web_search`。TUI 始终注册 `list_directory`，关闭搜索后仍可查看启动
 工作区的单层列表，不需要搜索 key，但仍需要模型 key 与模型工具调用能力。本轮没有
 `files.enabled`、可配置根目录或目录工具预算字段；路径、隐藏项与输出限制是工具硬边界，
-见 [目录工具契约](agent-loop.md#目录列表list_directory-v1)。
+见 [目录工具契约](../tools/list-directory.md#目录列表list_directory-v1)。
 
 ### 字段约束
 
@@ -204,18 +207,12 @@ search.connect_timeout_secs
 search.request_timeout_secs
 ```
 
-例如 `-c 'default_model="qwen-max"'`、`-c 'search.enabled=false'`；字符串需 TOML 引号。当前 CLI 仅在 TUI 分支将这些参数交给加载器；exec 收到任意 `-m/-c` 返回非零错误，不静默忽略。完整目标参数见 [CLI 设计](cli-surface.md)。
+例如 `-c 'default_model="qwen-max"'`、`-c 'search.enabled=false'`；字符串需 TOML 引号。当前 CLI 仅在 TUI 分支将这些参数交给加载器；exec 收到任意 `-m/-c` 返回非零错误，不静默忽略。完整目标参数见 [CLI 设计](../application/cli-surface.md)。
 
-`/model` 的首版契约：
-
-- 打开选择窗口，或 `/model <id>` 申请选择已有模型；命令本身不作为 User 消息发给模型。
-- 只允许空闲/失败且没有活动 Turn 时切换；运行中明确拒绝。
-- 保留历史，每个 Turn 固定使用启动时克隆的 Provider；Core 成功确认后更新界面。
-- 失败保留原绑定和草稿；成功不修改配置文件、不改变加载时的默认值。
-- 界面明确标示“仅本会话”；重启按配置及启动参数重新选择，不继承上一次内存绑定。
-- 成功表示本地配置与凭据装配完成，不保证远端已鉴权；远端失败仍走正常 Turn 错误链。
-
-首版不提供“设为默认”、登录或密钥管理动作。
+`/model` 只改变当前会话绑定，不修改配置或加载时的默认模型；重启仍按配置与启动覆盖
+选择。它接受已有 profile ID，不创建临时模型定义，不承担登录或密钥管理。
+目录/工厂/选择与确认以 [模型管理](../runtime/model-management.md) 为准，窗口与草稿规则见
+[TUI 接口](../tui/interface.md#模型窗口与确认链)。
 
 ## 6. 配置来源与可观测性
 
@@ -262,3 +259,44 @@ Vortex HOME: /home/ming/.vortex
 - 模型/搜索配置实际进入请求和工具限制，不仅改变 UI 标签。
 - `/model` 成功/失败、Running 拒绝、保留历史、不写文件、重启恢复默认值。
 - 文件与 API 测试使用 TempDir、fake 和本地 fixture，不调用真实付费接口；Windows 路径和权限在 Windows 单独验证。
+
+## 旧思考配置迁移
+
+本次明确迁移，不保留兼容别名或自动转换：
+
+| 旧配置 | 新配置 |
+| --- | --- |
+| `request_options="plain"` | 删除旧字段；thinking 省略或 mode 为 provider-default |
+| `request_options="qwen-stage-a"` | 删除旧字段；api_flavor=dashscope；模型 Disabled，原千问模型的两个能力均为 true |
+| DeepSeek 官方接口需要关闭思考 | api_flavor=deepseek；模型 Disabled，can_disable=true、历史控制为 false |
+| 百炼托管 DeepSeek 需要关闭思考 | api_flavor=dashscope；模型 Disabled，can_disable=true、历史控制为 false |
+
+旧字段继续通过 deny_unknown_fields 报错。程序不改写本地文件、不读 `.env`、不迁移
+用户目录；同 ID Provider 整条替换时，用户需要在新条目中显式保留正确方言。
+上一版未实现草稿中的 api_flavor=qwen 不保留别名，新配置继续严格拒绝未知值。
+
+### DeepSeek 官方接入示例
+
+原凭据文档中的配置示例集中保留于此。连接与模型分开定义，api_key_env 只保存变量名；
+服务端型号仅为示例，使用前须核对账户可用名称与权限，不代表已调用或验证远端。
+
+```toml
+[providers.deepseek]
+kind         = "openai-chat"          # OpenAI 兼容的 Chat Completions
+api_flavor   = "deepseek"             # 官方接口；托管接口须按其实际方言配置
+base_url     = "https://api.deepseek.com"
+api_key_env  = "DEEPSEEK_API_KEY"     # 变量名，不是值
+
+[models.deepseek-pro]
+provider = "deepseek"
+model = "deepseek-v4-pro"             # 示例，须确认账户实际可用名称
+display_name = "DeepSeek Pro"
+supports_tools = true
+
+[models.deepseek-pro.thinking]
+mode = "disabled"
+
+[models.deepseek-pro.thinking_capabilities]
+can_disable = true
+supports_history_control = false
+```

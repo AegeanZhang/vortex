@@ -25,7 +25,7 @@ crate。物理组织见 [仓库结构](repository-structure.md)，后续拆分�
 不维护对话历史，不决定模型何时调用工具，不在 bootstrap 中复制 Agent loop。
 上游是命令行与进程环境，下游是配置加载器、模型工厂、工具构造器及 TUI 入口。
 旧 `exec.rs` 直接发送非流式 HTTP，是当前例外，不是第二套目标执行核心。
-相关设计：[安装](../design/installation.md)、[CLI](../design/cli-surface.md)。
+相关设计：[安装](../design/application/installation.md)、[CLI](../design/application/cli-surface.md)。
 
 ## 2. 配置管理
 
@@ -35,7 +35,7 @@ crate。物理组织见 [仓库结构](repository-structure.md)，后续拆分�
 
 产物是 `LoadedConfig`，启动装配持有它并将配置交给工厂/工具；不存在热更新服务。
 配置层不读取密钥，不探测模型服务，不执行供应商请求字段转换，也不写回 TOML。
-优先级及项目字段限制以 [配置设计](../design/configuration.md) 为准。
+优先级及项目字段限制以 [配置设计](../design/configuration/configuration.md) 为准。
 
 ## 3. 模型管理
 
@@ -48,8 +48,8 @@ crate。物理组织见 [仓库结构](repository-structure.md)，后续拆分�
 失败保留旧绑定；每个 Turn 克隆一个固定 Provider，不在运行中跟随 UI 标签变化。
 
 不承担会话存储、远端模型目录探测、订阅登录或配置保存。上下游分别是已加载配置、
-Session 选择命令与 Provider 构造接口。相关设计：[Session 模型切换](../design/session-runtime.md#模型切换)、
-[思考选项](../design/provider-thinking-options.md)。
+Session 选择命令与 Provider 构造接口。相关设计：[模型管理](../design/runtime/model-management.md)、
+[思考选项](../design/provider/thinking-options.md)。
 
 ## 4. Session 调度
 
@@ -62,7 +62,7 @@ Turn task，消费其进度，先排空进度再发布完成/失败终态。业�
 走独立 watch，避免关闭通知排在普通命令或 UI 背压后面。
 
 不理解厂商 JSON 或终端控件，不做 Markdown 渲染，当前也不落盘或恢复会话。
-相关契约与资源释放边界见 [Session 设计](../design/session-runtime.md)。
+相关契约与资源释放边界见 [Session 设计](../design/runtime/session-runtime.md)。
 
 ## 5. Turn 执行与历史构建
 
@@ -76,7 +76,7 @@ Turn task，消费其进度，先排空进度再发布完成/失败终态。业�
 
 ReasoningDelta 根据 Provider 消费策略拒绝或转发，仅计数、不写入历史；TUI 保留显示文本。
 此模块不是完整 ContextAssembler：尚无指令加载、system prompt 装配、Token 裁剪或摘要。
-协议与历史规则见 [Agent loop](../design/agent-loop.md)、[消息构建](../design/message-building.md)。
+协议与历史规则见 [Agent loop](../design/runtime/agent-loop.md)、[消息构建](../design/runtime/message-building.md)。
 
 ## 6. 模型协议适配
 
@@ -89,8 +89,8 @@ Provider 实例持有 client、连接、密钥、转换后的请求字段和消�
 厂商增量组装成完整 ToolCall 和 ModelEvent，不能把网络 chunk 当作语义事件。
 
 不调度下一轮、不执行工具、不决定历史裁剪；相同模型在不同接口下的适配以显式方言
-和预设为准，不靠模型名猜测。细节见 [SSE](../design/streaming-response.md)、
-[Thinking 展示](../design/thinking-display.md)。
+和预设为准，不靠模型名猜测。细节见 [SSE](../design/provider/streaming-response.md)、
+[Thinking 展示](../design/tui/thinking-display.md)。
 
 ## 7. 工具执行与资源访问
 
@@ -103,7 +103,7 @@ CLI 固定先注册目录工具，再按配置选装秘塔或 Mock 搜索。目�
 注册表不伪造所有工具具有同一种超时/取消能力。
 
 目录只列一层、不读正文、不启动 Shell；路径边界、网络调用与输出预算见
-[内置工具设计](../design/agent-loop.md)。`vortex-sandbox` 当前不参与这条执行链。
+[目录工具](../design/tools/list-directory.md) 与 [网页搜索](../design/tools/web-search.md)。`vortex-sandbox` 当前不参与这条执行链。
 
 ## 8. 终端交互与展示
 
@@ -116,7 +116,7 @@ AppState 持有草稿、pending、notice、模型展示副本及响应阶段；T
 但不能创建会话事实；后台任务不直接操作终端。
 
 TUI 不读取配置/密钥，不依赖具体 Provider/Tool，不持久化 Thinking。交互及状态边界见
-[TUI 设计](../design/tui-interface.md)、[滚动设计](../design/transcript-scrolling.md)。
+[TUI 设计](../design/tui/interface.md)、[滚动设计](../design/tui/transcript-scrolling.md)。
 
 ## 状态与资源归属汇总
 

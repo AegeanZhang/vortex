@@ -1,7 +1,7 @@
 # 关键运行链路
 
 核对日期：2026-10-26。本文展示当前 TUI 主链路；职责映射见 [逻辑模块](logical-modules.md)，
-通道、状态和错误细节以 [Session 设计](../design/session-runtime.md) 为准。
+通道、状态和错误细节以 [Session 设计](../design/runtime/session-runtime.md) 为准。
 
 ## 1. 启动与对象装配
 
@@ -71,7 +71,7 @@ sequenceDiagram
 
 Session 的权威 history 与 Turn 的局部 context 分别更新。已完成工具步骤保留；
 最终成功 Assistant 只提交一次，失败步骤部分正文不提交。Thinking 仅向 UI 转发，
-每步骤独立计数，不写模型历史。完整规则见 [Agent loop](../design/agent-loop.md)。
+每步骤独立计数，不写模型历史。完整规则见 [Agent loop](../design/runtime/agent-loop.md)。
 
 ## 3. 消息与事件边界
 
@@ -114,7 +114,7 @@ sequenceDiagram
 ```
 
 UI 收到确认后才更新当前模型；pending、窗口关闭与草稿保护见
-[TUI 设计](../design/tui-interface.md#模型窗口与确认链)。选择不写配置、不清历史，
+[TUI 设计](../design/tui/interface.md#模型窗口与确认链)。选择不写配置、不清历史，
 下一轮可能将已有历史发送给新的服务。当前 Turn 的 Provider 固定，不在中途替换。
 
 ## 5. Shutdown、背压与资源释放

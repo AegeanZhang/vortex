@@ -1,11 +1,15 @@
 # Session Runtime 设计
 
+架构归属：Session 调度。状态：当前实现契约。源码入口：[session.rs](../../../crates/vortex-core/src/session.rs)。
+详见 [逻辑模块](../../architecture/logical-modules.md)；实现与验证结果以根 [README](../../../README.md) 为准。
+
 本文档描述文本流式与工具版 v1 中 `vortex-core` 的 Session runtime，以及它与
 `vortex-provider` 的边界。模型上下文未来如何裁剪和压缩，见
 [`message-building.md`](message-building.md)；TUI 如何消费 Session，见
-[`tui-interface.md`](tui-interface.md)。SSE 协议、Thinking 阶段和后续刷新策略见
-[`streaming-response.md`](streaming-response.md)；本文描述正文及展示-only 思考的运行时契约，
-实现与验收进度以根 [`README.md`](../../README.md) 为准。模型/工具交替执行的详细规则见
+[`../tui/interface.md`](../tui/interface.md)。SSE 协议见
+[Provider 流接口](../provider/streaming-response.md)，思考投影与后续刷新见
+[Thinking 展示](../tui/thinking-display.md)；本文描述正文及展示-only 思考的运行时契约，
+实现与验收进度以根 [`README.md`](../../../README.md) 为准。模型/工具交替执行的详细规则见
 [`agent-loop.md`](agent-loop.md)。
 
 ## 当前范围
@@ -14,7 +18,7 @@ Session runtime 负责保存对话事实、串行化命令、调度模型/工具
 HTTP、OpenAI wire format 或终端控件。每次只运行一个 Turn，Turn 内可以串行经历多个
 模型请求和工具调用，支持步骤/正文/思考事件、空闲/失败时的会话内模型切换和整个 Session 关闭；
 不包含思考历史回传、保留会话的 Turn 取消、持久化或恢复。源码契约与完整验收不同，
-模型切换专项测试仍需补齐。
+模型切换的完整专项矩阵仍需补齐，已补覆盖以根 README 为准。
 
 ```text
 CLI：加载配置，装配 ModelManager 和 ToolRegistry，调用 start_session
@@ -111,29 +115,17 @@ CLI 的 TUI 分支先经 bootstrap 调用 `start_session(models, tools)`，再�
 Session 通过关闭标志检查或 `shutdown_receiver.changed()` 响应。这样关闭通知不必等待
 普通命令排队，且能打断阻塞的 UI 事件发送；具体清理语义见下一节。
 
-阅读源码时，从 [`main.rs`](../../crates/vortex-cli/src/main.rs) 的 TUI 分支开始，再看
-[`event_loop.rs`](../../crates/vortex-tui/src/event_loop.rs) 的 `execute_effects` 和
-[`session.rs`](../../crates/vortex-core/src/session.rs) 的 `AgentHandle::send`、
+阅读源码时，从 [`main.rs`](../../../crates/vortex-cli/src/main.rs) 的 TUI 分支开始，再看
+[`event_loop.rs`](../../../crates/vortex-tui/src/event_loop.rs) 的 `execute_effects` 和
+[`session.rs`](../../../crates/vortex-core/src/session.rs) 的 `AgentHandle::send`、
 `start_session`、`match input`，即可沿上述路径定位。
 
 ## 模型切换
 
-`SelectModel { model_id }` 与 Prompt 共用业务命令队列。actor 在 Running 或仍有 ActiveTurn
-时发布 `ModelSelectionRejected { model_id, message }`，不排队等待 Turn 完成后自动切换。
-TUI 的本地检查不能代替这里的校验，因为界面状态可能滞后。
-
-非 Running 且无活跃 Turn 时调用 `models.select(id)`：检查目录/能力，调用 Factory 本地
-构造 Provider，成功后一起替换当前 ModelInfo 和 Provider，发布 `ModelSelected { model }`。
-不存在、能力不符或缺密钥等失败发布专用拒绝事件，保留原绑定。同 ID 幂等成功，不重新
-构造实例，但仍发布确认；不要复用普通 CommandRejected，否则 UI 无法可靠结束 pending。
-
-选择不产生 User/Assistant、不清空历史、不修改 SessionStatus、不发 TurnCompleted，也不
-写配置。搜索工具注册表仍使用启动配置。每次 SubmitPrompt 获取当时的 Provider，整个
-Turn 的模型/工具往返固定使用该 Arc，不将可变 ModelManager 传进 run_turn。
-
-切换 Provider 后，下一轮会把保留的历史发送给新服务；成功确认仅表示本地装配成功，
-不代表远端鉴权或模型可用性已验证。网络错误仍由下一次 Turn 的正常失败链处理。
-选择事件同样经过可被 Shutdown 中断的 publish_event，不新增第二套事件通道或关闭机制。
+Session 串行处理 SelectModel，Running 或 ActiveTurn 尚未回收时发布专用拒绝事件，
+不自动延期；成功或失败分别发布 ModelSelected/ModelSelectionRejected。
+目录、工厂装配、原子替换与凭据时机以 [模型管理](model-management.md) 为准。
+切换不改变历史或 SessionStatus，不写配置；每个 Turn 使用固定 Provider。
 
 ## 所有权与并发
 
@@ -228,30 +220,45 @@ DisplayOnly 思考超过每步字节上限时，run_turn 失败并释放流；Se
 
 ## Provider 适配边界
 
-`vortex-provider::OpenAiChatProvider` 是当前唯一实现。它把 `MessageRole` 映射为
-OpenAI-compatible Chat Completions 的 `user`、`assistant`、`system`，发送
-`stream: true`，将 SSE choice 0 的正文转换为 TextDelta，并组装单个完整 ToolCall。
-请求中的工具定义/调用/结果映射见 [Agent loop](agent-loop.md)。泛用构造器默认不发送思考控制参数；
-CLI 工厂将 Provider 的 api_flavor 与模型的 thinking、预设和能力覆盖装配为
-`OpenAiChatOptions`，先校验再读取 key。内置 Qwen 使用 DashScope 方言并显式关闭
-思考及思考历史；DeepSeek 官方使用独立字段，不能混用。具体转换见
-[思考选项设计](provider-thinking-options.md)。同 Provider 的不同模型不共用请求选项。
-工厂注入共享 Reqwest client，Core 不依赖其类型。
-显式 Qwen Thinking 预设可装配 DisplayOnly，ProviderDefault/Disabled 则为 Reject。
-DeepSeek Enabled 尚未适配，不能只修改 TOML 开启。完整历史边界见
-[Thinking 展示](thinking-display.md)。
+Session 只消费 ModelProvider 的语义流，不使用 Reqwest/SSE/厂商 DTO。
+具体请求/响应映射、超时与 Decoder 规则见 [SSE 设计](../provider/streaming-response.md)，
+工厂职责见 [模型管理](model-management.md)，Thinking 请求选择见 [思考选项](../provider/thinking-options.md)。
+步骤与思考增量按本文件事件契约转发；展示-only 不进入权威历史，UI 投影见
+[Thinking 展示](../tui/thinking-display.md)。
 
-Provider 负责 HTTP 状态、SSE Content-Type、分帧与 JSON 校验，并要求合法 `finish_reason`
-加 `[DONE]` 才产生 Finished。等待响应头上限为 30 秒，每次等待下一个 body chunk 的空闲
-上限为 120 秒；没有总时长限制或自动重连。空 choices 统计包可忽略，不能当作空回复错误。
+## 进度排空与发布背压
 
-网络故障映射为 `Transport`，非成功 HTTP 状态映射为 `HttpStatus`，JSON 或回复内容不合法
-映射为 `InvalidResponse`。API key 由 CLI 从指定进程环境变量注入，Provider 的
-`SecretString` 调试输出固定为 `***`；产品本身不读取 `.env`。
+每个 Turn 的 `run_turn` 任务由 `JoinSet<Result<TurnOutput, TurnError>>` 管理，使用独占的
+有界 TurnProgress 通道（容量 32）。任务处理多个模型步骤，进度发送端只由该任务持有。
+actor 的 ActiveTurn 只保存接收端；正文、步骤编号、思考字节计数和每步结束原因由 run_turn 管理。它维护历史
+副本，不直接修改权威历史，也不把完整回答再次发送给 TUI。
+
+| 输入 | 处理位置与行为 |
+| --- | --- |
+| 有效 SubmitPrompt | 记录 User，发 UserMessageAdded、AssistantMessageStarted，启动本轮任务 |
+| TurnProgress::TextDelta | 发布 AssistantTextDelta；仍为 Running |
+| ModelStepStarted / 合法 ReasoningDelta | 转发步骤/思考事件；思考仅展示，不提交历史；仍为 Running |
+| ToolStarted / ToolFinished | 发布工具事件；完成步骤写入前缀/调用/结果，仍为 Running |
+| 模型 Finished(ToolCalls) | run_turn 执行工具并再次调用模型，不结束 Turn |
+| Reject 策略收到 ReasoningDelta、思考超限或 Provider Err | run_turn 返回错误并释放流；此前进度排空后统一失败 |
+| 通道关闭 | 回收本轮 task，依据 TurnOutput/TurnError 或 JoinError 提交成功/失败 |
+| Running 时再次提交 | CommandRejected；不改当前缓冲、状态或历史 |
+| Shutdown / UI 消失 | 中止任务、丢弃活跃流并关闭 Session；不自动重试 |
+
+**不能用 task 提前完成作为 TurnCompleted 的依据。** 通道关闭时此前 Delta 已按 FIFO
+读完，再检查 task 返回值，避免最后一段丢失、终态越过 Delta 或污染下一轮。每轮使用
+新通道，上一轮完全回收前不接受下一轮；以后允许重叠/取消重启时再引入 TurnId。
+
+Core → UI 仍使用有界通道，完整保留文本事件，不用 `try_send` 丢 Delta，也不改成无限队列。
+仅把网络放进 task 不能保证退出：actor 若阻塞在 UI channel 的 `send().await`，仍可能收不到
+Shutdown。因此使用内部 `watch<bool>` 关闭信号：`AgentHandle::send(Shutdown)` 通知它，
+actor 的主 select 和每一次事件发送均监听关闭；外部 AgentCommand 形状不变。所有句柄
+关闭、消费者消失、错误提前返回也必须释放 JoinSet，从而中止网络任务。通知发送成功不代表
+取消已经完成，测试需要另外观察活跃流释放及事件通道关闭。
 
 ## 单元测试矩阵
 
-通用组织方式和执行命令见 [`../engineering/testing.md`](../engineering/testing.md)。测试不得
+通用组织方式和执行命令见 [`../../engineering/testing.md`](../../engineering/testing.md)。测试不得
 调用真实付费 API。下表是应覆盖的契约，不代表全部已有测试；覆盖现状见根 README。
 
 | 模块与位置 | 场景 | 关键断言 |
@@ -272,10 +279,10 @@ Provider 负责 HTTP 状态、SSE Content-Type、分帧与 JSON 校验，并要�
 | 同上 | 模型确认发布遇到背压 | Shutdown 仍能结束；选择不改 status 或配置文件 |
 | `vortex-core/src/model.rs` | 目录与实例绑定 | 重复 ID 拒绝、同 ID 幂等、失败不部分更新 |
 | `vortex-core/src/agent_loop.rs`、`tool.rs` | 工具闭环与异常 | 结果回填、错误恢复、轮数和 ID 校验；详见 agent-loop.md |
-| `vortex-provider/src/openai_chat/request.rs` | 请求映射 | role/content、工具定义与结果正确，stream 为 true，千问开关按显式选项写入 |
-| `src/openai_chat/decoder.rs`、`src/sse_transport.rs` | HTTP/SSE 异常与结束 | 状态码、Content-Type、坏 JSON、缺 DONE、超时映射正确；统计包不结束模型步骤 |
-| 同上 | 字节分帧与工具增量 | 中文跨 chunk、多行 data 不丢内容；参数拼接、空 ID 和非空 ID 变化正确处理 |
-| `src/openai_chat/mod.rs` | 密钥脱敏 | SecretString 的 Debug 不包含原始密钥 |
+
+
+模型目录/工厂的专项以 [模型管理](model-management.md) 为准；HTTP/SSE 映射矩阵见
+[Provider 验收](../provider/streaming-response.md#provider-专项矩阵)。
 
 并发测试应使用 `oneshot`、`Notify` 或受控 fake Provider 明确控制完成时机，不依赖
 `sleep` 猜测调度。Core fake 测试绕过 HTTP/SSE，不能替代 Provider 测试；后者优先测试
@@ -284,5 +291,5 @@ Provider 负责 HTTP 状态、SSE Content-Type、分帧与 JSON 校验，并要�
 ## 后续演进
 
 Thinking 展示已通过 Core 事件投影到 TUI，思考历史仍需单独扩展消息结构，具体规则
-见流式响应设计。CancelTurn、恢复历史、工具详情/审批事件等仍应先扩展 Core
+见 [消息构建目标](message-building.md#思考历史扩展目标)。CancelTurn、恢复历史、工具详情/审批事件等仍应先扩展 Core
 契约，再由 CLI 或 TUI 使用，不能把厂商响应或界面状态塞进 `CoreEvent`。

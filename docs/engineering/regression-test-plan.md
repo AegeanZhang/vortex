@@ -6,8 +6,8 @@
 - 目录工具契约同步：2026-10-21；区分目录工具/装配已有用例与仍待补的全链路场景，结果见根 README。
 - 思考选项、目录与 Thinking 实施稿回收：2026-10-26；补齐人工验收顺序和失败分类，不新增通过声明。
 - 定位：从本地实施稿回收的测试方法与待补场景，不是测试通过记录。
-- 契约依据：[Session](../design/session-runtime.md)、[Agent loop](../design/agent-loop.md)、
-  [SSE](../design/streaming-response.md)。实际覆盖与运行结果见根 [README](../../README.md)。
+- 契约依据：[Session](../design/runtime/session-runtime.md)、[Agent loop](../design/runtime/agent-loop.md)、
+  [SSE](../design/provider/streaming-response.md)。实际覆盖与运行结果见根 [README](../../README.md)。
 
 ## 1. 文件组织与测试替身
 
@@ -153,7 +153,7 @@ TestBackend 覆盖 Markdown 围栏跨 Delta、布局、Unicode 测高及手动�
 阶段 C 再测试第二轮独立思考回传、User/System 无思考字段、
 Snapshot 保留与模型能力限制。不得为了提前通过这些目标测试添加占位成功逻辑。
 
-强制重绘与休眠恢复另见 [终端画面恢复](../design/terminal-redraw-recovery.md)；
+强制重绘与休眠恢复另见 [终端画面恢复](../design/tui/terminal-redraw-recovery.md)；
 TestBackend 不能替代真实 Kitty/PTY 的恢复验证。
 
 ## 7. 数据与执行
@@ -176,7 +176,7 @@ cargo test -p vortex-tui --locked
 
 本节从 `20261014-01.md` 第 12 节回收。对应功能已接入不等于测试已写入；在追加之前
 先查看现有 tests，保留已通过的历史记录，不重复添加同名模块或重写旧测试。
-[思考选项迁移](../design/provider-thinking-options.md) 已完成；request_options 是严格拒绝的旧字段。
+[思考选项迁移](../design/provider/thinking-options.md) 已完成；request_options 是严格拒绝的旧字段。
 
 2026-10-19 已新增思考选项离线单测：config.rs 验证默认值、条目替换、三种 profile、旧字段/
 非法值拒绝及覆盖白名单；Provider 的 options.rs、request.rs 和 mod.rs 验证策略/能力/
@@ -373,8 +373,8 @@ FakeProvider 集成验收，不能仅凭模型回答声称“已查看”判断�
 
 由作者在用户配置中准备各自有效的 profile，分别验收百炼 Qwen、DeepSeek 官方与
 百炼托管 DeepSeek；profile ID 自行对应，不认为内置了所有候选。装配契约见
-[Provider 思考选项](../design/provider-thinking-options.md)，配置示例见
-[配置设计](../design/configuration.md)。
+[Provider 思考选项](../design/provider/thinking-options.md)，配置示例见
+[配置设计](../design/configuration/configuration.md)。
 
 1. 导出所选模型凭据，以 `cargo run -p vortex-cli --locked -- -m <profile-id> -c 'search.enabled=false'`
    启动，验证首段正文、正常终态与关闭思考的实际表现。关闭搜索仍保留目录工具。
@@ -409,7 +409,7 @@ Mock 仅替代搜索服务，模型仍可能计费。Disabled 若返回思考，
 ### Thinking 展示与工具往返
 
 先核对实际服务地址、模型名和 `dashscope-qwen-display-only` 预设的适用范围，再显式
-选择配置好的 Thinking profile。已有配置示例见 [配置设计](../design/configuration.md)，
+选择配置好的 Thinking profile。已有配置示例见 [配置设计](../design/configuration/configuration.md)，
 只选择预设不能证明远端符合展示-only 历史契约。
 
 1. 简单文本问题：有公开思考时独立显示 Thinking，正文保持 Markdown；无思考时不编造。

@@ -1,11 +1,14 @@
 # Thinking 流式展示 v1 设计
 
+架构归属：终端交互与展示及跨层思考消费。状态：当前展示契约；绘制节流另标目标。源码入口：[transcript.rs](../../../crates/vortex-tui/src/widgets/transcript.rs)、[agent_loop.rs](../../../crates/vortex-core/src/agent_loop.rs)。
+详见 [逻辑模块](../../architecture/logical-modules.md)；实现与验证结果以根 [README](../../../README.md) 为准。
+
 - 日期：2026-10-23。
 - 修订：2026-10-26，同步请求装配、事件链、TUI 投影与离线测试边界。
 - 状态：描述当前展示-only 契约；实现及离线/人工验收记录以根 README 为准。
 - 目标：先完整观察一次模型步骤的公开思考与正文，以及工具前后的步骤边界，再推进上下文装配。
-- 关联：[SSE](streaming-response.md)、[思考选项](provider-thinking-options.md)、
-  [Session](session-runtime.md)、[TUI](tui-interface.md)。
+- 关联：[SSE](../provider/streaming-response.md)、[思考选项](../provider/thinking-options.md)、
+  [Session](../runtime/session-runtime.md)、[TUI](interface.md)。
 
 ## 1. 范围与接入选择
 
@@ -18,64 +21,16 @@ profile 的关闭行为，不自动改用户配置、不新增网络探测，不
 这里展示的是 API 返回的文本或摘要，不是完整内部推理；没有返回时不补造，也不使用
 Prompt 强迫模型输出 Thought 标签。思考不是新 MessageRole，不拼入 Assistant 正文。
 
-首版只接受选中上述预设、解析后 `can_enable=true` 且支持关闭思考历史控制的 DashScope 接入。
-`can_enable` 表示此模型在该接入下允许显式开启，不是“模型具有推理能力”的通用声明。
-“可以设置历史控制参数”不等于“工具循环允许省略思考回传”。Provider 的预设还提供
-独立的 `DisplayOnlyWithHistoryDisabled` 历史契约标记；无预设时为 Unverified。
-用户能力覆盖不能创造这个标记，只有三个 true 的自定义 Enabled 仍拒绝。
-DeepSeek 官方、百炼托管 DeepSeek 和 Generic 的显式 Enabled 在本版均拒绝；它们的
-Disabled / ProviderDefault 继续保持现有请求装配行为。
-
-2026-10-23 核对的官方资料说明：
-
-- [百炼深度思考](https://help.aliyun.com/zh/model-studio/deep-thinking)：
-  通过 enable_thinking 控制适用模型，公开思考与正文分别返回。
-- [百炼参数](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)：
-  preserve_thinking 控制历史 reasoning 是否作为输入；文档对部分型号默认值有例外，
-  本版一律显式关闭，不依赖默认值。
-- [DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)：
-  请求携带 tools 时，后续请求须回传此前 reasoning，不能套用本版仅展示策略。
-
-这些是协议选择依据，不是已完成的真实 API 验收。Qwen 的思考＋工具往返仍需作者人工
-验证；若具体端点要求回传 reasoning，本版应停止将它作为展示-only 候选，不能靠吞字段
-或静默关闭工具凑通。没有外部服务切换或付费调用的默认授权。
-
-预设只记录静态适用契约，不验证远端身份、路由或实际响应。显式使用预设表示选择相应
-契约，不按域名或型号自动猜测，也不拒绝用户明确配置的兼容路由别名；不适用的接入
-不能仅靠选择该 ID 被视为已支持。实际服务商、型号、工具往返必须纳入人工验收。
-Kimi/GLM 不是免适配的替代品，它们的工具思考历史同样需单独设计，见
-[Kimi Thinking](https://platform.kimi.ai/docs/guide/use-thinking-models) 和
-[GLM 思考模式](https://docs.bigmodel.cn/cn/guide/capabilities/thinking-mode)
-（资料核对：2026-10-23；本次修订未执行远端实验）。
+接入预设、可选覆盖、独立历史适用标记与方言矩阵由
+[Provider 思考选项](../provider/thinking-options.md#8-能力预设与覆盖) 统一维护；配置输入见
+[配置设计](../configuration/configuration.md)。当前仅特定 Qwen 展示-only 接入允许 Enabled，不支持 DeepSeek
+思考历史回传。静态能力声明不证明远端兼容，实际工具往返仍需人工验收。
 
 ## 2. 请求策略与运行时策略分开
 
-当前分层接口：
-
-| 层 | 当前职责 |
-| --- | --- |
-| Core ThinkingMode | 增加 Enabled，保留 ProviderDefault 默认值 |
-| Core ThinkingCapabilities | 增加默认 false 的 can_enable |
-| Core 配置输入 | thinking_preset 可选字符串；ThinkingCapabilitiesOverride 三个 Option<bool> |
-| Provider 预设解析 | 保守基线 → 显式预设 → 逐字段覆盖；另保存预设的历史适用契约 |
-| Provider 请求选项 | 校验能力和历史契约；Enabled 仅映射为 DashScope 的 true/false 两个字段 |
-| ModelProvider | 增加默认 Reject 的 reasoning_output_policy 方法 |
-| ReasoningOutputPolicy | Reject / DisplayOnly，不包含 HTTP、方言或 TUI 类型 |
-
-`DisplayOnly` 仅由成功装配的显式 Enabled 得到。ProviderDefault 即使远端返回思考，
-在本版仍拒绝；Disabled 返回思考也不能偷偷接收。这样保留当前严格边界，不把支持 UI
-展示误变成所有模型都开启或接受思考。策略取自本 Turn 固定的 Provider 实例，不从
-TUI 当前标签、日志或模型名称反推。
-
-工厂的目录不可用原因与 create 入口使用相同选项校验，非法组合在读取 key 之前失败。
-重复 with_options 必须同时替换请求字段和输出策略，不能留下前一组模型选项。
-项目配置与 -c 白名单不扩展，开启由用户级完整模型 profile 明确声明。
-
-配置输入与运行时能力分开：覆盖中的 None 表示未填写，Some(false) 必须覆盖预设 true；
-不能在反序列化时提前变成 false。未知预设或方言不匹配本地拒绝，未选中的非法模型标记
-不可用但不读取其 key。预设不包含连接、模型路由或 thinking 开关，不引入完整模型目录。
-详细配置、旧 TOML 兼容和装配接口见
-[Provider 选项契约](provider-thinking-options.md#8-能力预设与覆盖)。
+Provider 根据已校验请求选择 Reject/DisplayOnly，Turn 对照固定实例的策略决定是否转发；
+Session 只发布步骤与思考事件，不保存思考。UI 不从模型名称或当前标签推断消费权限。
+ProviderDefault 不等于关闭，Disabled 意外返回思考仍拒绝，不能以显示能力绕过协议限制。
 
 ## 3. 增量事件与模型步骤
 
@@ -128,7 +83,7 @@ DisplayOnly 思考仅存当前 TUI 内存，不写模型历史、Snapshot、会�
 未来重连/恢复会丢失这些展示信息是本版显式限制，不因此修改 SessionSnapshot。
 
 绘制节流不阻挡首版正确性验收；先沿用增量绘制。若真实终端出现明显卡顿，再单独实施
-[SSE 文档](streaming-response.md#7-tui-投影与刷新) 中的 dirty/tick 节流候选方案，不能用
+[绘制节流目标](#绘制节流目标) 中的 dirty/tick 节流候选方案，不能用
 丢弃增量或逐字 sleep 代替。纯文本渲染不自动等同于终端控制字符防护，后者仍需专门验收。
 
 ## 5. 分批验收
@@ -142,8 +97,8 @@ DisplayOnly 思考仅存当前 TUI 内存，不写模型历史、Snapshot、会�
 
 自动化测试使用 fake 和固定 SSE JSON，不访问真实模型；预设/请求、Decoder、Core、Session
 和 TUI 已有离线回归，实际结果只在根 README 记录。原实施稿已回收并清理，人工验收
-顺序与失败分类见 [回归测试方案](../engineering/regression-test-plan.md#thinking-展示与工具往返)。
-本文件与 [配置设计](configuration.md) 保留当前契约，不依赖本地临时文件。
+顺序与失败分类见 [回归测试方案](../../engineering/regression-test-plan.md#thinking-展示与工具往返)。
+本文件与 [配置设计](../configuration/configuration.md) 保留当前契约，不依赖本地临时文件。
 
 ### 人工验收与已知限制
 
@@ -162,3 +117,14 @@ DeepSeek 的工具思考历史支持须另立方案：完整保留工具步骤 A
 与调用关系，适配 wire 请求，解决跨模型切换和数据出口，不只是给最终回答加一个字段。
 签名、opaque reasoning 与文本 reasoning 不混为一类。上下文组装、长期记忆、持久化、
 CancelTurn、工具卡片、思考折叠与 Token 统计不纳入本版。
+
+## 绘制节流（目标）
+
+绘制节流是独立的待实施步骤。当前每个 Delta 请求重绘，仅合并同批 Effect，不跨事件合并。
+目标是接收与绘制解耦：收到事件立即更新数据并置 dirty；每约 33 ms 最多绘制一次，空闲不绘制。
+Tokio interval 使用 `MissedTickBehavior::Skip`，结束/失败可强制刷新最后一帧。退出优先清理，
+不要求再画终态。禁止逐字 sleep，也不合并丢弃生命周期事件。
+
+每次按当前整条 Assistant 原文解析 Markdown，不逐 delta 独立解析。沿用 follow_tail，
+历史浏览时不强制到底；未闭合代码围栏和 resize 的回流不承诺完全稳定阅读锚点。先节流，
+再按测量结果缓存完成消息；不改变已选的 Markdown 渲染器，不顺手修复滚动条视觉问题。

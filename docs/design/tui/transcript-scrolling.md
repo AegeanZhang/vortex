@@ -1,7 +1,10 @@
 # Transcript 滚动设计
 
+架构归属：终端交互与展示。状态：当前滚动契约。源码入口：[transcript.rs](../../../crates/vortex-tui/src/widgets/transcript.rs)。
+详见 [逻辑模块](../../architecture/logical-modules.md)；实现与验证结果以根 [README](../../../README.md) 为准。
+
 本文定义 TUI Transcript 当前的滚动行为；整体界面状态流与终端生命周期见
-[`tui-interface.md`](tui-interface.md)。
+[`interface.md`](interface.md)。
 
 ## 目标与边界
 
@@ -40,7 +43,7 @@ struct TranscriptScroll {
 `content_height` 和 `viewport_height` 是最近一次绘制得到的度量值，用于 reducer 执行
 翻页和边界限制。`Event::Resize` 通过 RedrawRequested 主动请求绘制，按新尺寸重新计算
 度量与边界；不等于强制清屏或修复终端缓存失同步。slash 菜单覆盖而不改变 Transcript
-尺寸，关闭后正常绘制恢复底层；具体交互见 [TUI 接口](tui-interface.md#slash-命令与菜单)。
+尺寸，关闭后正常绘制恢复底层；具体交互见 [TUI 接口](interface.md#slash-命令与菜单)。
 
 ## Action 与数据流
 
@@ -111,7 +114,7 @@ let state = ScrollbarState::new(scroll_positions)
 Markdown 先按消息转换，随后用同一个 Paragraph、内容宽度和 Wrap 参数测量及绘制，
 不能按源码换行数、Span 数量或转换前文本长度猜测高度。固定预留滚动条列，避免滚动条
 出现后改变换行宽度导致反复测高。转换边界见
-[`ADR 0001`](../architecture/decisions/0001-transcript-markdown-rendering.md)。
+[`ADR 0001`](../../architecture/decisions/0001-transcript-markdown-rendering.md)。
 
 所有宽高计算使用 `saturating_sub`。当区域窄到无法容纳边框、内容或滚动条时，允许只绘制
 外框或空内容，但不能 panic。将 `usize` 转为 Paragraph 所需的 `u16` 时应使用受限转换，

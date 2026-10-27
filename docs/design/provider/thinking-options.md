@@ -1,5 +1,8 @@
 # Provider 思考选项装配设计
 
+架构归属：模型协议适配。状态：当前请求装配契约。源码入口：[options.rs](../../../crates/vortex-provider/src/openai_chat/options.rs)、[thinking_presets.rs](../../../crates/vortex-provider/src/openai_chat/thinking_presets.rs)。
+详见 [逻辑模块](../../architecture/logical-modules.md)；实现与验证结果以根 [README](../../../README.md) 为准。
+
 - 日期：2026-10-19。
 - 修订：2026-10-26，同步能力预设、可选覆盖、Enabled 请求与输出策略。
 - 状态：描述当前请求装配与展示-only 契约；实现进度及离线/人工验收结果见根 README。
@@ -7,12 +10,12 @@
 
 当前支持 ProviderDefault、Disabled，以及指定 Qwen 候选的 DashScope 展示-only Enabled。
 能力预设、可选覆盖和独立历史契约见第 8 节；响应消费和 UI 规则见
-[Thinking 展示 v1](thinking-display.md)。DeepSeek/Generic Enabled 尚未适配。
+[Thinking 展示 v1](../tui/thinking-display.md)。DeepSeek/Generic Enabled 尚未适配。
 
 当前源码使用接口方言、模型思考策略与能力声明，Provider 通过统一 `with_options` 装配。
 默认千问显式关闭思考；其他服务省略参数时可能返回思考文本，触发现有 Agent loop
 的拒绝分支；只有成功装配的显式 Enabled 允许展示思考。完整配置见
-[配置设计](configuration.md)，响应和历史边界见 [SSE 设计](streaming-response.md)。
+[配置设计](../configuration/configuration.md)，响应和历史边界见 [SSE 设计](streaming-response.md)。
 
 ## 1. 策略、能力与适配分层
 
@@ -45,25 +48,7 @@ DashScope 在本文仅表示百炼 OpenAI-compatible Chat Completions 扩展，�
 `/chat/completions`；不是 DashScope 原生 API 或 Responses API。
 
 模型使用 `thinking`、可选 `thinking_preset` 与高级 `thinking_capabilities` 覆盖表。
-内置 Qwen 默认关闭，等价用户配置为：
-
-```toml
-[providers.qwen]
-kind = "openai-chat"
-api_flavor = "dashscope"
-base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-api_key_env = "QWEN_API_KEY"
-
-[models.qwen-max]
-provider = "qwen"
-model = "qwen3.8-max"
-display_name = "Qwen Max"
-supports_tools = true
-thinking_preset = "dashscope-qwen-display-only"
-
-[models.qwen-max.thinking]
-mode = "disabled"
-```
+内置 Qwen 默认关闭；完整 TOML、字段范围及项目白名单见 [配置设计](../configuration/configuration.md)。
 
 `mode` 支持：
 
@@ -141,18 +126,8 @@ Provider 内的选项模块负责纯转换，输出类型化字段；请求 DTO 
 
 ## 5. 配置迁移
 
-本次明确迁移，不保留兼容别名或自动转换：
-
-| 旧配置 | 新配置 |
-| --- | --- |
-| `request_options="plain"` | 删除旧字段；thinking 省略或 mode 为 provider-default |
-| `request_options="qwen-stage-a"` | 删除旧字段；api_flavor=dashscope；模型 Disabled，原千问模型的两个能力均为 true |
-| DeepSeek 官方接口需要关闭思考 | api_flavor=deepseek；模型 Disabled，can_disable=true、历史控制为 false |
-| 百炼托管 DeepSeek 需要关闭思考 | api_flavor=dashscope；模型 Disabled，can_disable=true、历史控制为 false |
-
-旧字段继续通过 deny_unknown_fields 报错。程序不改写本地文件、不读 `.env`、不迁移
-用户目录；同 ID Provider 整条替换时，用户需要在新条目中显式保留正确方言。
-上一版未实现草稿中的 api_flavor=qwen 不保留别名，新配置继续严格拒绝未知值。
+旧 request_options 与字段别名的拒绝规则、三种接入的迁移说明统一见
+[配置设计](../configuration/configuration.md#旧思考配置迁移)。程序不改写用户文件，也不自动迁移目录。
 
 ## 6. 验收与后续
 
@@ -182,7 +157,7 @@ Provider 内的选项模块负责纯转换，输出类型化字段；请求 DTO 
 ## 8. 能力预设与覆盖
 
 本节定义当前预设与覆盖规则，普通用户无需逐项填写能力。运行时展示契约以
-[Thinking 展示 v1](thinking-display.md) 为准。
+[Thinking 展示 v1](../tui/thinking-display.md) 为准。
 
 ### 用户配置与解析顺序
 

@@ -148,9 +148,9 @@ Session：持续接收输入、取消与关闭等命令，维护会话历史
 4. 长任务逐步加入上下文预算与压缩。流式工具执行和并发工具可后置，届时需一并设计
    调用顺序、进度事件、结果记录顺序及取消语义。
 
-正式契约参见 [Agent loop 设计](../design/agent-loop.md)、
-[Session 运行时](../design/session-runtime.md)、[消息构建](../design/message-building.md)
-及 [SSE 设计](../design/streaming-response.md)。搜索工具的云端/本地边界另见
+正式契约参见 [Agent loop 设计](../design/runtime/agent-loop.md)、
+[Session 运行时](../design/runtime/session-runtime.md)、[消息构建](../design/runtime/message-building.md)
+及 [SSE 设计](../design/provider/streaming-response.md)。搜索工具的云端/本地边界另见
 [Web Search 调研](web-search-research.md)。
 
 ## 6. 源码证据索引
@@ -252,7 +252,7 @@ ReAct 的重点不是重写 while，而是通过示例、推理与真实观察�
   视为数据。目录工具也描述路径、截断和不可信文件名等边界。
 - Session 从空历史开始；虽然 Provider 支持 System 角色映射，当前运行路径没有统一
   装配 Agent 系统指令、运行环境和 ReAct 教学示例。
-- 独立 Instruction / ContextAssembler 是 [消息构建设计](../design/message-building.md)
+- 独立 Instruction / ContextAssembler 是 [消息构建设计](../design/runtime/message-building.md)
   中的后续目标，不能把目标字段当作现有 ModelRequest API。
 
 更准确的描述是：执行闭环已有，指导模型使用闭环的上下文层还较薄。角色、日期、环境、

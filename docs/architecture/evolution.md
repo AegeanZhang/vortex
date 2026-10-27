@@ -37,7 +37,7 @@ Transcript 当前承担展示条目、Markdown 组装、滚动度量与绘制；
 
 | 触发条件 | 应增加或调整的职责 | 前提与限制 |
 | --- | --- | --- |
-| 加入 system prompt、项目指令或 Token 预算 | 独立上下文装配，分离指令、历史选择与 wire 转换 | 复用 [消息构建设计](../design/message-building.md)；不把 ContextAssembler 写成现有 API |
+| 加入 system prompt、项目指令或 Token 预算 | 独立上下文装配，分离指令、历史选择与 wire 转换 | 复用 [消息构建设计](../design/runtime/message-building.md)；不把 ContextAssembler 写成现有 API |
 | exec 迁移 | CLI 增加 Session 事件的文本呈现，复用已有 Turn loop | 明确输出、错误和退出语义，不复制第二套工具循环 |
 | 第二个文件工具 | 从 WorkspaceFs 中确认可复用的路径和句柄规则，增加有界读取 | 不把列目录授权扩大成读写授权，保持输出与数据外发边界 |
 | 文件修改或 Shell | 引入权限决策、审批及进程隔离/取消边界 | 先设计并验证，再接入副作用；Linux 目标选型为 Bubblewrap，当前尚未实现 |

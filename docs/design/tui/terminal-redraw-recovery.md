@@ -1,8 +1,11 @@
 # 终端画面恢复与强制重绘（待验证）
 
+架构归属：终端交互与展示。状态：待验证问题与候选修复；未实现修复。源码入口：[terminal.rs](../../../crates/vortex-tui/src/terminal.rs)、[event_loop.rs](../../../crates/vortex-tui/src/event_loop.rs)。
+详见 [逻辑模块](../../architecture/logical-modules.md)；实现与验证结果以根 [README](../../../README.md) 为准。
+
 - 首次记录：2026-09-22；回收日期：2026-10-06。
 - 状态：Kitty 异常待复现、待定位；强制恢复机制未实现，Resize 已接入常规重绘。
-- 来源：本地 `2026-09-22-tui-display-loss.md`。关联 [TUI](tui-interface.md) 与
+- 来源：本地 `2026-09-22-tui-display-loss.md`。关联 [TUI](interface.md) 与
   [Transcript 滚动](transcript-scrolling.md)。
 
 ## 现象与证据边界

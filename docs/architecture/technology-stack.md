@@ -31,11 +31,11 @@ Schema 声明，实际参数由具体工具校验。以下目标不混入当前�
 
 这些方向是已有目标约束，不是当前可用功能；后续职责与接入条件见 [架构演进](evolution.md)。
 
-TUI 选型依据见 [`../research/rust-tui-research.md`](../research/rust-tui-research.md)，CLI 和凭据相关决策分别见 [`../design/cli-surface.md`](../design/cli-surface.md) 与 [`../design/credentials.md`](../design/credentials.md)。
+TUI 选型依据见 [`../research/rust-tui-research.md`](../research/rust-tui-research.md)，CLI 和凭据相关决策分别见 [`../design/application/cli-surface.md`](../design/application/cli-surface.md) 与 [`../design/cross-cutting/credentials.md`](../design/cross-cutting/credentials.md)。
 
 ## 安装与配置边界
 
-[安装设计](../design/installation.md) 与 [配置设计](../design/configuration.md) 定义首版边界：
+[安装设计](../design/application/installation.md) 与 [配置设计](../design/configuration/configuration.md) 定义首版边界：
 CLI 的 AppPaths 通过标准库原生路径/用户目录 API 解析 HOME、cwd 和文件位置，日志与
 bootstrap 共用结果；Core config 接收明确路径，读取放到 Tokio 阻塞池，合并/校验保持
 协议无关。Core 不依赖 Reqwest、具体 Provider 或终端类型。
@@ -49,7 +49,7 @@ Core 定义 ModelFactory/ModelManager，只认识元数据和 Provider trait；C
 ConfiguredModelFactory 解析显式思考预设与可选覆盖，再将方言、策略、能力和独立历史契约
 映射为 OpenAiChatOptions，先校验
 再按需读取 key，并注入共享 Reqwest client；厂商字段转换留在 Provider，见
-[思考选项设计](../design/provider-thinking-options.md)。模型 client 和秘塔 client 均关闭自动重定向与隐式重试；Factory 只本地装配，不
+[思考选项设计](../design/provider/thinking-options.md)。模型 client 和秘塔 client 均关闭自动重定向与隐式重试；Factory 只本地装配，不
 执行探测请求，不承担 OAuth/订阅登录。
 
 项目文件只检查启动 cwd，不向上查找、不自动定位 Git 根。产品默认值随程序发布，硬限制由校验与执行入口保证，首版不增加外置系统配置或管理员策略。默认 HOME 与配置加载已接入，日志不再要求必须设置 VORTEX_HOME；Windows/macOS 的目录、权限和整个产品仍需原生验收，不能由 Linux 编译推断。
@@ -69,7 +69,7 @@ ConfiguredModelFactory 解析显式思考预设与可选覆盖，再将方言、
 
 ## 流式输出依赖与边界
 
-[`流式响应设计`](../design/streaming-response.md) 使用 `eventsource-stream` 解析 SSE、
+[`流式响应设计`](../design/provider/streaming-response.md) 使用 `eventsource-stream` 解析 SSE、
 `async-stream` 构造惰性事件流、`serde_json` 解析事件载荷。Workspace 声明前两者的版本
 要求分别为 `0.2.3` 和 `0.3.6`，Provider 通过 `workspace = true` 引用；实际版本由根
 `Cargo.lock` 固定。Reqwest 启用 `json` 和 `stream` features。
@@ -86,7 +86,7 @@ Tokio 的 `time` feature 用于搜索超时。目录工具另启用 `rt` 和 `sy
 `spawn_blocking` 与后台并发额度；不能把异步等待取消等同于终止阻塞 I/O。
 Mock 搜索不发网络请求；秘塔搜索使用 Reqwest
 直接调用网页检索 API，厂商请求与响应 DTO 留在具体 Tool 实现层，不进入 Core 公共接口。
-工具契约见 [Agent loop 与内置工具](../design/agent-loop.md)，搜索候选比较见 [调研](../research/web-search-research.md)。
+工具契约见 [注册表](../design/tools/tool-registry.md)、[目录列表](../design/tools/list-directory.md) 与 [网页搜索](../design/tools/web-search.md)，搜索候选比较见 [调研](../research/web-search-research.md)。
 
 Workspace 声明 `cap-std = "4.0.3"`、
 `cap-fs-ext = { version = "4.0.3", features = ["std"] }`，Tools 通过 workspace 引用，

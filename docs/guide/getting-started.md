@@ -6,7 +6,7 @@
 作者反馈 Qwen 诗词请求的 Thinking 可显示，Thinking 工具往返、完整配置/切换矩阵与
 真实终端验收仍待补充。以下配置用法描述当前代码，不表示所有接入或异常场景均已验收。
 完整验证边界以根 README 为准。其他命令和后续能力的
-目标形态见 [`../design/cli-surface.md`](../design/cli-surface.md)，不要把设计文档中的
+目标形态见 [`../design/application/cli-surface.md`](../design/application/cli-surface.md)，不要把设计文档中的
 未实现部分当成现有功能。
 
 ## 环境要求
@@ -104,7 +104,7 @@ Provider 定义连接、接口方言和密钥变量名；模型 profile 定义�
 `thinking.mode` 缺省为 `provider-default`，省略参数而不是关闭思考；该模式与 disabled
 均拒绝意外返回的思考增量。显式 disabled 要求解析后 can_disable=true，并与接口方言匹配。DeepSeek 官方与
 百炼托管接入的参数不同，不能仅按模型名称配置；完整示例与旧字段迁移见
-[思考选项设计](../design/provider-thinking-options.md)。旧 request_options 字段已不接受。
+[思考选项设计](../design/provider/thinking-options.md)。旧 request_options 字段已不接受。
 
 ### 开启 Qwen Thinking
 
@@ -135,7 +135,7 @@ cargo run -p vortex-cli --locked -- -m qwen-thinking -c 'search.enabled=false'
 该命令仍调用真实模型并可能计费；关闭搜索只是不调用搜索服务。可先用诗词等纯文本
 请求检查 Thinking 标签、弱化纯文本与 Markdown 正文。默认模型不会因新增 profile 改变。
 思考仅存本次 TUI 内存，不回传或恢复。当前 DeepSeek Enabled 不可用；Qwen 搜索可能
-触发单次响应多工具调用限制，详见 [Thinking 设计](../design/thinking-display.md#人工验收与已知限制)。
+触发单次响应多工具调用限制，详见 [Thinking 设计](../design/tui/thinking-display.md#人工验收与已知限制)。
 
 ### 项目配置与加载规则
 
@@ -190,8 +190,8 @@ cargo run -p vortex-cli --locked -- -c 'search.max_results=3'
 工具定义与工具结果会发送给当前选中模型，两个服务可能分别计费；不要在查询中放入敏感内容。
 `MockWebSearch` 仅在显式配置时注册，不是默认工具。思考历史回传、定时刷新、会话恢复、
 保留会话的 Turn 取消、MCP 和沙箱尚未实现。已实现代码的
-设计入口是 [`../design/session-runtime.md`](../design/session-runtime.md) 和
-[`../design/tui-interface.md`](../design/tui-interface.md)。
+设计入口是 [`../design/runtime/session-runtime.md`](../design/runtime/session-runtime.md) 和
+[`../design/tui/interface.md`](../design/tui/interface.md)。
 
 文本流式的手动验收清单（待执行，不是通过记录）：
 
@@ -237,7 +237,7 @@ RUST_LOG=info,vortex_tools=debug cargo run -p vortex-cli --locked
 仍回填模型，由模型继续处理，不必然使整个 Turn 失败。产品尚无应用内代理配置，
 客户端保留 Reqwest 默认系统代理行为；成功联网不能据此证明大陆无代理直连。
 
-详细接口见 [Agent loop](../design/agent-loop.md)。正常路径已跑通，无需反复验证同一个
+详细接口见 [网页搜索工具](../design/tools/web-search.md)。正常路径已跑通，无需反复验证同一个
 成功请求；建议保留一份不含认证信息的响应样例，后续补空结果与异常契约测试。
 
 ### 目录列表工具
@@ -269,7 +269,7 @@ TUI 不直接显示文件树或原始工具 JSON，模型接收结果后生成�
 完整秘密检测器。只在自己明确选择的目录运行，不开启正文 TRACE 来分享真实目录数据。
 工具尚无审批系统、进程沙箱或硬 I/O 超时，已开始的阻塞读取不会因 `/exit` 强制终止，
 挂起的网络盘可能拖延退出。Linux 离线测试不代表 Windows junction 等边界已验收。
-完整契约见 [Agent loop 与内置工具](../design/agent-loop.md)。
+完整契约见 [目录列表工具](../design/tools/list-directory.md)。
 
 ### 旧单次模式的边界
 
@@ -277,7 +277,7 @@ TUI 不直接显示文件树或原始工具 JSON，模型接收结果后生成�
 收到 `-m/-c` 明确返回
 非零错误；不传时仍走旧执行路径，也不使用本节清单验收。完整命令目标
 （exec 模式、`vortex resume`、审批与沙箱参数、输出契约、退出码）记录在
-[`../design/cli-surface.md`](../design/cli-surface.md)，不可把其中所有参数视为已经实现。
+[`../design/application/cli-surface.md`](../design/application/cli-surface.md)，不可把其中所有参数视为已经实现。
 
 ## 日志与本地配置
 

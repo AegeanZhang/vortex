@@ -1,11 +1,14 @@
 # TUI 接口设计
 
+架构归属：终端交互与展示。状态：当前实现契约。源码入口：[app.rs](../../../crates/vortex-tui/src/app.rs)、[event_loop.rs](../../../crates/vortex-tui/src/event_loop.rs)。
+详见 [逻辑模块](../../architecture/logical-modules.md)；实现与验证结果以根 [README](../../../README.md) 为准。
+
 接口核对日期：2026-10-26。本文描述当前实现契约，包含 Thinking 步骤投影；离线与真实交互的验证边界见根 README，后续能力单独标注。
 
 本文档以文本流式和工具状态接口为基线，说明 `vortex-tui` 如何消费
 `vortex-core::SessionConnection`。Session actor 和 Provider 调用链见
-[`session-runtime.md`](session-runtime.md)，技术选型见
-[`../research/rust-tui-research.md`](../research/rust-tui-research.md)。
+[`../runtime/session-runtime.md`](../runtime/session-runtime.md)，技术选型见
+[`../../research/rust-tui-research.md`](../../research/rust-tui-research.md)。
 
 ## 职责边界
 
@@ -168,7 +171,7 @@ Prompt 固定底部；菜单左对齐覆盖 main_area 底部，不缩小 Transcr
 
 Paste、动态多行高度、更多 slash 命令和鼠标菜单选择尚未实现。粘贴隔离是后续独立工作，
 不能因单行命令校验或 Enter Repeat 过滤就保证粘贴的换行不会提交。
-交互取舍与后续输入方案见 [调研](../research/tui-layout-and-input-research.md)。
+交互取舍与后续输入方案见 [调研](../../research/tui-layout-and-input-research.md)。
 
 ## PromptEditor 边界
 
@@ -223,7 +226,7 @@ ResponsePhase 是 UI 专属 Waiting/Reasoning/Answering/Tool，不扩展 Core �
 `start_session` 通过 `tokio::spawn` 启动，两者并发运行。TUI 不只是命令生产者，还消费
 Session 返回的 CoreEvent；Session 不只是命令消费者，还负责发布会话事件。每个 Turn
 另有短生命周期的 run_turn 任务，它可串行发起多个模型请求与工具执行，完整路径见
-[`Session：启动顺序与三个执行角色`](session-runtime.md#启动顺序与三个执行角色)。
+[`Session：启动顺序与三个执行角色`](../runtime/session-runtime.md#启动顺序与三个执行角色)。
 
 Event loop 使用 `tokio::select!` 等待 `EventStream` 和 `CoreEventStream`。Action 经过
 reducer 产生 Effect，所有 Effect 执行完后再决定退出或重绘。`redraw` 标志会合并同一批
@@ -246,7 +249,7 @@ TUI 运行期间不得使用 `println!` 破坏屏幕。
 
 ## 单元测试矩阵
 
-通用规范见 [`../engineering/testing.md`](../engineering/testing.md)。优先测试 reducer 和
+通用规范见 [`../../engineering/testing.md`](../../engineering/testing.md)。优先测试 reducer 和
 widget 的确定性状态，不通过真实键盘或真实 Provider 制造条件。
 以下矩阵包含已覆盖与待补场景，不代表全部完成；具体数量与执行结果只在根 README 记录。
 
@@ -284,7 +287,7 @@ fake Session/channel，禁止访问真实模型服务。
 
 - 模型目录过滤/分组、参数补全、鼠标选择，以及独立显式保存默认模型；不隐式写盘。
 - `CancelTurn`；未来 `Ctrl+C` 在 Running 时应先取消，Idle 时才退出。
-- Thinking 折叠、思考历史恢复与跨事件重绘节流，目标见 [`streaming-response.md`](streaming-response.md)。
+- Thinking 折叠与思考历史恢复仍待设计，跨事件重绘节流见 [绘制节流目标](thinking-display.md#绘制节流目标)。
 - Paste 与 bracketed-paste 生命周期、动态多行输入、更多 slash 命令与鼠标菜单交互。
 - pending_submit、Core 拒绝后的草稿恢复、退出完成确认、强制重绘恢复。
 - 工具详情/来源卡片、审批弹窗、多行提交策略和会话恢复。

@@ -3,7 +3,7 @@
 - 调研日期：2026-09-17
 - 范围：Ratatui 中的 Markdown 展示、候选库、Codex / Claude Code 实现对照
 - 定位：技术调研与候选方案，不代表已经确定依赖或授权修改代码
-- 关联设计：[`TUI 接口`](../design/tui-interface.md)、[`Transcript 滚动`](../design/transcript-scrolling.md)
+- 关联设计：[`TUI 接口`](../design/tui/interface.md)、[`Transcript 滚动`](../design/tui/transcript-scrolling.md)
 - 关联调研：[`TUI 技术选型`](rust-tui-research.md)、[`屏幕模式与输入交互`](tui-layout-and-input-research.md)
 
 后续决策已记录于 [`ADR 0001`](../architecture/decisions/0001-transcript-markdown-rendering.md)：

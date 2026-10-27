@@ -307,4 +307,4 @@ BrowseComp 偏难定位、稳定短事实，不等于“今天新闻”正确性
 所有头部工具当前使用同一评测套件，更不能证明其未公开的内部测试内容。
 
 后续采纳需形成独立工程方案/ADR。相关入口：[架构总览](../architecture/overview.md)、
-[Agent loop](../design/agent-loop.md)、[回归测试方案](../engineering/regression-test-plan.md)。
+[Agent loop](../design/runtime/agent-loop.md)、[回归测试方案](../engineering/regression-test-plan.md)。

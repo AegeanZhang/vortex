@@ -29,67 +29,21 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 ## 详细设计
 
-单个子系统的对外契约，是写代码时的直接依据。
+[设计导航](design/README.md) 按架构职责索引接口、状态、不变量及验收要求，并记录旧文档的迁移去向。
 
-- [`design/installation.md`](design/installation.md) —— 安装入口与程序包、跨平台统一 `.vortex` HOME、cwd-only 项目路径、首次启动和目录生命周期；区分目标设计与当前部署能力。
+- 应用与配置：[启动装配](design/application/startup.md)、[CLI](design/application/cli-surface.md)、
+  [安装路径](design/application/installation.md)、[配置](design/configuration/configuration.md)。
+- 运行时：[模型管理](design/runtime/model-management.md)、[Session](design/runtime/session-runtime.md)、
+  [Agent loop](design/runtime/agent-loop.md)、[消息构建](design/runtime/message-building.md)。
+- 模型协议：[SSE/流接口](design/provider/streaming-response.md)、[思考选项](design/provider/thinking-options.md)。
+- 工具：[注册表](design/tools/tool-registry.md)、[目录列表](design/tools/list-directory.md)、[网页搜索](design/tools/web-search.md)。
+- 交互：[TUI](design/tui/interface.md)、[Thinking 展示](design/tui/thinking-display.md)、
+  [滚动](design/tui/transcript-scrolling.md)、[终端画面恢复](design/tui/terminal-redraw-recovery.md)。
+- 横切与候选：[凭据](design/cross-cutting/credentials.md)、[开发方向](design/development-directions.md)。
 
-  **什么时候查**：设计安装、用户目录、日志位置或 Windows 路径适配时。
-
-- [`design/configuration.md`](design/configuration.md) —— 已接入 TUI 的模型/搜索配置契约：来源、优先级、受限项目字段、模型级请求选项、按需凭据和来源诊断；测试边界见根 README。
-
-  **什么时候查**：实现 config、HOME/日志入口迁移、`-m/-c` 或 `/model` 时；正式契约优先于本地实施稿。
-
-- [`design/provider-thinking-options.md`](design/provider-thinking-options.md) —— 思考策略、方言、显式能力预设与可选覆盖；请求字段、输出策略和独立历史契约的装配规则。
-
-  **什么时候查**：装配厂商请求选项、开启 Qwen Thinking，或诊断某个 profile 不可用时。
-
-理解工具版 TUI 时，建议依次阅读 `session-runtime.md`、`agent-loop.md`、
-`streaming-response.md`、`tui-interface.md` 和 `message-building.md`：先看调度与工具循环，
-再看协议和界面投影，最后区分最小请求模型与后续上下文构建目标。
-
-- [`design/cli-surface.md`](design/cli-surface.md) —— `vortex` 命令行接口：模式、参数、输出契约、退出码，以及各部分归属哪个落地阶段。
-
-  **什么时候查**：实现或修改 CLI 时。参数命名与语义以此为准，不要在代码里临时决定。
-
-- [`design/credentials.md`](design/credentials.md) —— 环境密钥按需读取、`.env` 的定位、Provider/模型分离、搜索关闭/Mock 的凭据边界及脱敏规则。
-
-  **什么时候查**：接入新 Provider、处理 API 密钥、写任何会记录请求内容的日志时。
-
-- [`design/session-runtime.md`](design/session-runtime.md) —— Session actor、ModelManager/Factory、模型切换确认、每 Turn 固定 Provider、状态和事件顺序。
-
-  **什么时候查**：阅读 `vortex-core`、排查 TUI 为何收到某个事件，或补充 Session/Provider 测试时。
-
-- [`design/streaming-response.md`](design/streaming-response.md) —— SSE 增量、步骤/思考事件和任务终态，以及后续思考历史策略与绘制节流。
-
-  **什么时候查**：理解流式 Provider、增加思考显示或验证流中断与退出时。
-
-- [`design/thinking-display.md`](design/thinking-display.md) —— 当前 Thinking 展示 v1：Qwen 预设与展示-only 历史边界、请求/消费策略、模型步骤、TUI 投影及离线/人工验收边界。
-
-  **什么时候查**：准备开启思考、传递 ReasoningDelta 或实现思考与正文分区时；不代表已支持 DeepSeek 工具思考回传。
-
-- [`design/agent-loop.md`](design/agent-loop.md) —— 工具版 v1 的 Tool/Registry、历史回填、ID/轮数限制、秘塔/Mock 搜索、工作区目录列表与阻塞取消边界及测试契约。
-
-  **什么时候查**：阅读 run_turn、接入真实工具，或补充工具调用与多步失败测试时。
-
-- [`design/message-building.md`](design/message-building.md) —— 会话事件如何形成模型上下文，以及 Tool call、Token 预算和 Provider 映射规则。
-
-  **什么时候查**：实现 Agent loop、上下文压缩、工具调用或 Provider 请求转换时。
-
-- [`design/tui-interface.md`](design/tui-interface.md) —— TUI 状态流、`/exit`/`/model` 解析与窗口、pending/确认/草稿保护、增量事件和终端生命周期。
-
-  **什么时候查**：阅读 `vortex-tui`、核对 Enter/Tab/Esc、模型切换确认和草稿保留，补充 reducer/widget 测试或增加交互时。
-
-- [`design/transcript-scrolling.md`](design/transcript-scrolling.md) —— Transcript 的滚动状态、自动跟随、按键映射、滚动条渲染和测试边界。
-
-  **什么时候查**：实现长对话浏览、滚动条或 Transcript resize 行为时。
-
-- [`design/terminal-redraw-recovery.md`](design/terminal-redraw-recovery.md) —— Kitty 中边框/状态栏丢失的证据、排查步骤和强制重绘候选设计；尚未确认根因或实现修复。
-
-  **什么时候查**：排查休眠恢复后的画面异常，或设计 Resize/Ctrl+L 重绘时。
-
-- [`design/development-directions.md`](design/development-directions.md) —— 后续输入、取消、配置、上下文、工具与会话能力的候选方向和依赖，不作为完成状态或固定排期。
-
-  **什么时候查**：讨论下一项能力的范围与前置条件时。
+**什么时候查**：编写或 Review 某个子系统时，从其主文档查契约；阅读当前链路按
+启动 → 模型管理 → Session → Agent loop → Provider/工具 → TUI。目标 API 与待验证项
+分别标注，不将完整上下文装配、审批、MCP 或持久化当作已实现。
 
 ## 调研
 
@@ -102,8 +56,8 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 - [`research/rust-tui-research.md`](research/rust-tui-research.md) —— TUI 技术选型，结论是 Ratatui + Crossterm + Tokio。
 - [`research/tui-layout-and-input-research.md`](research/tui-layout-and-input-research.md) —— Codex/Claude Code 屏幕模式与输入交互对照，以及 Vortex slash 菜单、多行输入和粘贴方案。
 - [`research/transcript-markdown-research.md`](research/transcript-markdown-research.md) —— Markdown 渲染库选型、Codex/Claude Code 实现对照，以及 Transcript 排版、滚动和流式展示的候选方案。
-- [`research/cli-design-research.md`](research/cli-design-research.md) —— Claude Code 与 Codex CLI 的接口对照，`design/cli-surface.md` 中若干决策的依据。
-- [`research/credential-handling-research.md`](research/credential-handling-research.md) —— 两者如何处理 API 密钥与 `.env`，`design/credentials.md` 的依据。
+- [`research/cli-design-research.md`](research/cli-design-research.md) —— Claude Code 与 Codex CLI 的接口对照，`design/application/cli-surface.md` 中若干决策的依据。
+- [`research/credential-handling-research.md`](research/credential-handling-research.md) —— 两者如何处理 API 密钥与 `.env`，`design/cross-cutting/credentials.md` 的依据。
 
   **什么时候查**：想改动某个已定的设计、觉得现有方案别扭时。先看调研里有没有已经权衡过的反例。
 
@@ -129,12 +83,12 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 | 原临时稿 | 正式文档去向 |
 | --- | --- |
-| `20260919-01.md`、`20260919-02-test.md` | [SSE 设计](design/streaming-response.md)、[回归测试方案](engineering/regression-test-plan.md) |
-| `20260922-01.md`、`2026-09-22-SSE抽象问题.md` | [SSE 的跨协议边界与等价拆分](design/streaming-response.md) |
-| `20260927-01.md` | [Agent loop](design/agent-loop.md)、[回归测试方案](engineering/regression-test-plan.md) |
-| `20261002-01.md` | [秘塔接入契约](design/agent-loop.md)、[搜索专项回归](engineering/regression-test-plan.md) |
+| `20260919-01.md`、`20260919-02-test.md` | [SSE 设计](design/provider/streaming-response.md)、[回归测试方案](engineering/regression-test-plan.md) |
+| `20260922-01.md`、`2026-09-22-SSE抽象问题.md` | [SSE 的跨协议边界与等价拆分](design/provider/streaming-response.md) |
+| `20260927-01.md` | [Agent loop](design/runtime/agent-loop.md)、[回归测试方案](engineering/regression-test-plan.md) |
+| `20261002-01.md` | [秘塔接入契约](design/tools/web-search.md)、[搜索专项回归](engineering/regression-test-plan.md) |
 | `20261006-01.md` | [旧代码清理方案](engineering/code-cleanup.md) |
-| `2026-09-22-tui-display-loss.md` | [终端画面恢复待验证方案](design/terminal-redraw-recovery.md) |
+| `2026-09-22-tui-display-loss.md` | [终端画面恢复待验证方案](design/tui/terminal-redraw-recovery.md) |
 | `codex-tui.md` | [TUI 布局与输入调研](research/tui-layout-and-input-research.md) 已包含对应观察，不重复追加 |
 
 `rust-learn.md` 是个人学习笔记，问题尚未整理为项目规范，本次保留，不作为工程事实引用。
@@ -143,8 +97,8 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 | 原临时稿 | 正式文档去向 |
 | --- | --- |
-| `20261007-01.md` | [TUI 的 slash 解析、补全、菜单与退出契约](design/tui-interface.md)、[回归测试方案](engineering/regression-test-plan.md) |
-| `20261014-01.md` | [安装](design/installation.md)、[配置](design/configuration.md)、[Session](design/session-runtime.md)、[TUI](design/tui-interface.md)、[凭据](design/credentials.md) 已收录主要契约；剩余路径/配置/模型/搜索专项测试及人工验收回收到 [回归测试方案](engineering/regression-test-plan.md) |
+| `20261007-01.md` | [TUI 的 slash 解析、补全、菜单与退出契约](design/tui/interface.md)、[回归测试方案](engineering/regression-test-plan.md) |
+| `20261014-01.md` | [安装](design/application/installation.md)、[配置](design/configuration/configuration.md)、[Session](design/runtime/session-runtime.md)、[TUI](design/tui/interface.md)、[凭据](design/cross-cutting/credentials.md) 已收录主要契约；剩余路径/配置/模型/搜索专项测试及人工验收回收到 [回归测试方案](engineering/regression-test-plan.md) |
 
 上述两份本地原稿在核对后删除，旧阶段编译缺口、临时副本路径和被当前代码取代的
 逐行迁移代码不继续维护。原稿中的待补测试仍为待补，不因回收或旧测试通过而变成
@@ -154,9 +108,9 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 | 原临时稿 | 正式文档去向 |
 | --- | --- |
-| `20261019-01.md` | [Provider 思考选项](design/provider-thinking-options.md)、[配置设计](design/configuration.md) 已覆盖现行装配与迁移契约；三种接入的人工验收与失败排查补入 [回归测试方案](engineering/regression-test-plan.md) |
-| `20261020-01.md` | [Agent loop 与目录工具](design/agent-loop.md) 已覆盖句柄路径、预算、错误和取消边界；真实调用链与平台专项验收补入 [回归测试方案](engineering/regression-test-plan.md) |
-| `20261023-01.md` | [Thinking 展示](design/thinking-display.md)、[Provider 思考选项](design/provider-thinking-options.md)、[配置设计](design/configuration.md) 已覆盖预设、输出策略和事件链；工具往返验收顺序与失败分类补入 [回归测试方案](engineering/regression-test-plan.md) |
+| `20261019-01.md` | [Provider 思考选项](design/provider/thinking-options.md)、[配置设计](design/configuration/configuration.md) 已覆盖现行装配与迁移契约；三种接入的人工验收与失败排查补入 [回归测试方案](engineering/regression-test-plan.md) |
+| `20261020-01.md` | [Agent loop 与目录工具](design/tools/list-directory.md) 已覆盖句柄路径、预算、错误和取消边界；真实调用链与平台专项验收补入 [回归测试方案](engineering/regression-test-plan.md) |
+| `20261023-01.md` | [Thinking 展示](design/tui/thinking-display.md)、[Provider 思考选项](design/provider/thinking-options.md)、[配置设计](design/configuration/configuration.md) 已覆盖预设、输出策略和事件链；工具往返验收顺序与失败分类补入 [回归测试方案](engineering/regression-test-plan.md) |
 
 三份实施稿已核对并删除，不重复保存大段逐行迁移代码；早期仅支持关闭思考、目录工具
 待实现等描述由当前正式契约取代。[后续方向](design/development-directions.md) 同步区分
