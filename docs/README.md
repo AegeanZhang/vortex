@@ -4,10 +4,17 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 ## 架构
 
-- [`architecture/README.md`](architecture/README.md) —— 架构文档入口，包含系统总览、仓库组织、技术选型与术语表。
+- [`architecture/README.md`](architecture/README.md) —— 架构阅读导航、文档职责与维护规则。
+- [`architecture/overview.md`](architecture/overview.md) —— 当前系统边界、整体架构与未接入能力。
+- [`architecture/logical-modules.md`](architecture/logical-modules.md) —— 八个逻辑模块的职责、接口、状态归属及源码映射。
+- [`architecture/runtime-flows.md`](architecture/runtime-flows.md) —— 启动、Prompt/工具循环、事件边界、模型切换和退出时序。
+- [`architecture/repository-structure.md`](architecture/repository-structure.md) —— 实际目录、crate 依赖和源码阅读入口。
+- [`architecture/technology-stack.md`](architecture/technology-stack.md) —— 当前技术选择及尚未接入的目标选型。
+- [`architecture/evolution.md`](architecture/evolution.md) —— 配置、Session 与 TUI 的后续内部拆分建议及功能演进条件，不代表已经重构。
+- [`architecture/glossary.md`](architecture/glossary.md) —— 逻辑模块、运行时与协议相关术语。
 - [`architecture/decisions/0001-transcript-markdown-rendering.md`](architecture/decisions/0001-transcript-markdown-rendering.md) —— 首版使用 tui-markdown 的决策逻辑、依赖边界与后续优化条件。
 
-  **什么时候查**：新建 crate、决定某段代码放进哪个 crate、拿不准某处能否依赖另一个 crate 时。
+  **什么时候查**：理解整体系统、梳理模块职责、跟踪调用链，或判断代码应放在哪里、是否需要拆分时。
 
 ## 工程规范
 

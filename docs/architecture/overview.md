@@ -1,82 +1,100 @@
 # 架构总览
 
-Vortex 将 Agent 执行核心、Provider、工具、沙箱、终端 UI 与命令行入口拆分为职责清晰的 crate。共享接口不得依赖具体终端 UI 或模型服务，产品二进制名称统一为 `vortex`。
+核对日期：2026-10-26。本文描述当前源码的整体结构；后续调整见 [架构演进](evolution.md)，
+实际验证结果见根 [README](../../README.md)。逻辑模块不等同于 Rust module 或 Cargo crate。
+
+## 系统定位与边界
+
+Vortex 是用于学习 Rust 与 CLI Agent 实现细节的终端 Agent，二进制名为 `vortex`。
+当前主链路是交互式 TUI：接收用户输入，串行调度模型与工具，将正文和公开思考增量
+投影到界面；会话事实保存在进程内存中。另有未迁移的旧 `exec` 单次 HTTP 路径。
+
+系统外部包括终端、模型 HTTP 服务、秘塔搜索服务、启动工作目录和用户配置/日志目录。
+模型决定是否请求工具，程序校验协议、调用 ID 和预算并执行已注册能力；
+当前没有通用权限审批、Shell、文件写入或 OS 沙箱，不能将执行限制视为完整安全隔离。
+
+## 逻辑架构
+
+```mermaid
+flowchart TB
+    User[用户与终端] <--> UI[终端交互与展示]
+    Boot[应用入口与装配] --> Config[配置管理]
+    Boot --> Models[模型管理与本地工厂]
+    Boot --> UI
+    Boot --> Session[Session 调度]
+    Boot --> Tools[工具注册与资源访问]
+    UI -->|命令与关闭信号| Session
+    Session -->|会话事件| UI
+    Session --> Models
+    Session -->|固定 Provider 与历史副本| Turn[Turn 执行与历史构建]
+    Turn -->|ModelProvider| Adapter[模型协议适配]
+    Adapter -->|语义事件流| Turn
+    Turn -->|ToolRegistry| Tools
+    Turn -->|进度与最终结果| Session
+    Adapter <--> ModelAPI[外部模型服务]
+    Tools --> FS[启动工作目录]
+    Tools --> SearchAPI[秘塔或本地 Mock]
+```
+
+图中箭头表示运行时协作，不是 Cargo 依赖。八个逻辑模块的接口、状态归属和源码映射
+见 [逻辑模块](logical-modules.md)，关键调用顺序见 [运行链路](runtime-flows.md)。
 
 ## 依赖方向
 
-以下是目标依赖边界，不表示所有能力已接入；沙箱/MCP、持久化和 exec 共享 Session
-均需按设计演进，当前实现与验证进度见根 README。
+当前 manifest 中的兄弟 crate 依赖如下；完整图见 [仓库组织](repository-structure.md)：
 
-```text
-vortex-cli ──┬─> vortex-tui ─────┐
-             ├─> vortex-provider ├─> vortex-core   （trait 与事件模型）
-             ├─> vortex-tools ───┤
-             └─> vortex-sandbox ─┘
+- CLI 依赖 Core、Provider、Tools 和 TUI，承担具体实现的组合装配。
+- Provider、Tools、TUI 分别依赖 Core，彼此不依赖。
+- Core 不依赖任何兄弟 crate，也不依赖 Reqwest、Ratatui 或 Crossterm。
+- Sandbox 是独立 workspace 成员，目前只有模板函数和测试，没有产品依赖指向它。
 
-vortex-tools ──> vortex-sandbox
-```
-
-三条硬规则：
-
-1. `vortex-core` 不依赖任何兄弟 crate，也不依赖 Ratatui、Reqwest 等具体实现库；它承载协议无关的 Session/Agent loop、语义类型、trait、配置和结构化错误。
-2. 只有 `vortex-cli` 认识全部具体实现，并在组合层完成装配。更换 Provider 或 UI 不应迫使核心逻辑改变。
-3. 目标是 TUI 与单次模式共用同一事件流：exec 应将核心事件渲染成纯文本，不另写执行循环。现有 exec 是尚待迁移的旧 HTTP 路径，不代表目标边界已满足。
+依赖倒置通过 Core 的 `ModelProvider`、`ModelFactory` 和 `Tool` trait 实现。
+Core 调用注入对象，不需要依赖实现这些接口的 crate。Core 不是纯类型包：它已使用
+Tokio 调度任务，并在 `config.rs` 中执行同步配置文件读取。
 
 ## crate 职责
 
-| crate | 负责 | 明确不负责 |
+| crate | 当前职责 | 当前边界 |
 | --- | --- | --- |
-| `vortex-core` | 事件模型、Agent loop、会话持久化、配置、权限策略和 trait | HTTP、终端、进程管理 |
-| `vortex-provider` | 构造 Provider 请求、解析流式响应并转换为内部事件 | 决定何时调用模型 |
-| `vortex-tools` | 内置工具、JSON Schema 与 stdio MCP client | 决定工具是否获批 |
-| `vortex-sandbox` | 进程隔离、可写边界和网络开关 | 工具业务逻辑 |
-| `vortex-tui` | 状态机与纯渲染 | 直接调用 Provider 或工具 |
-| `vortex-cli` | 参数解析、单次模式、依赖装配和面向用户的中文错误提示 | 承载可复用业务逻辑 |
+| `vortex-cli` | 参数、路径、日志、启动装配、具体模型工厂与旧 exec | TUI 使用统一 Session；exec 尚未复用它 |
+| `vortex-core` | 配置、模型绑定、会话调度、Turn loop、历史语义及 Provider/Tool 接口 | 无模型 HTTP、终端控件、持久化或审批实现 |
+| `vortex-provider` | OpenAI-compatible Chat Completions 请求、思考选项适配、HTTP/SSE 与解码 | 不选择任务、不决定何时执行工具 |
+| `vortex-tools` | 目录列表、工作区句柄、秘塔与 Mock 搜索 | 不调度模型；没有 MCP 或文件编辑/Shell |
+| `vortex-tui` | 输入与 slash、状态投影、Effect、控件与终端生命周期 | 不读取密钥，不持有具体 Provider，不保存权威历史 |
+| `vortex-sandbox` | 模板占位 | 尚未提供隔离或审批能力 |
 
-Core 的 Tool trait/ToolRegistry 不依赖具体工具；ListDirectoryTool、MetasoWebSearch 与
-MockWebSearch 位于 vortex-tools。CLI 在 TUI 模式下注入启动 cwd 的目录工具，再按配置选装一种
-搜索实现，不同时注册同名工具；关闭搜索不等于空注册表。目录访问的句柄边界不代表
-vortex-sandbox 已接入。一个 Turn 的模型/工具交替执行位于 Core 的 run_turn，
-Provider 只转换协议，TUI 只消费进度。接口见 [Agent loop](../design/agent-loop.md)。
+## 数据与控制边界
 
-安装、HOME 和日志/配置路径由 CLI 统一解析，Core config 接收明确文件路径并负责加载、来源记录、合并与校验；不自行推导安装位置或系统用户目录。用户 HOME 默认是用户主目录下 `.vortex`，项目配置只检查启动 cwd，不自动查找 Git 根；首版不增加系统配置文件层。此链路已接入 TUI，跨平台和专项验收边界见根 README；契约见 [安装设计](../design/installation.md) 与 [配置设计](../design/configuration.md)。
+Session 独占权威 `Vec<ConversationItem>`、状态与 `ModelManager`；每个 Turn 获取固定的
+Provider 和历史副本。Turn 完成一个工具步骤后通知 Session 记录，最终成功正文另行提交；
+失败步骤的部分正文不写入权威历史，已完成工具步骤保留。
 
-Core 的 ModelManager 持有模型目录、当前模型元数据和 `Arc<dyn ModelProvider>`，通过
-ModelFactory trait 请求本地构造实例；CLI ConfiguredModelFactory 才认识连接、请求选项和
-凭据读取。Session actor 独占 manager，切换成功后发确认，每个 Turn 获取固定 Provider；
-TUI 只保存目录/当前模型的展示副本及 pending，不反向调用具体实现，也不写配置。
-CLI 按实际工具注册表统一判断模型目录与创建入口的 tools 能力；当前 TUI 即使关闭搜索，
-仍因目录工具而要求模型声明支持工具调用。
+TUI 的 Transcript、当前模型标签和响应阶段均为展示状态。`CoreEvent` 是实时通知，
+不是已经具备完整重放能力的事件存储；初始 Snapshot 也不是持久化或实时共享对象。
+展示-only Thinking 进入 TUI 内存，不进入对话历史、Snapshot 或后续模型请求。
 
-库层返回保留上下文的结构化错误，CLI 层负责将其转换为面向用户的中文提示和稳定退出码。
+配置管理与运行时绑定分开：CLI 提供明确文件路径，Core 加载并合并 TOML，CLI 工厂
+再验证具体接入的选项并按需读取环境密钥。`/model` 改变会话绑定，不写回配置。
 
 ## 横切约束
 
-- Provider、Tool、会话存储和 UI 通过内部事件模型解耦。
-- 会话事件、内部语义消息和 Provider 请求保持分层，消息构建规则见 [`../design/message-building.md`](../design/message-building.md)。
-- TUI 只通过 Session snapshot、Agent command 和 Core event 与运行时交互，接口契约见 [`../design/tui-interface.md`](../design/tui-interface.md)。
-- 工具参数使用 JSON Schema 描述；文件修改、Shell 和 MCP 工具经过同一权限策略。
-- Linux 默认以当前工作区为可写边界，并通过 Bubblewrap 禁止网络；不得绕过审批执行越界操作。
-- API 密钥只从进程环境读取，日志和错误信息必须脱敏。详细规则见 [`../design/credentials.md`](../design/credentials.md)。
-- 项目指令按目录层级读取 `AGENTS.md`，越接近目标文件的规则优先。
+- 并发：一个 Session 同时只接受一个活跃 Turn；TUI loop、Session actor 和 Turn task
+  通过有界通道协作，不意味着各自占用独立线程。
+- 错误：底层类型化错误逐层返回，Turn 失败映射为事件，TUI/CLI 负责呈现。
+  完整稳定退出码仍是 [CLI 目标设计](../design/cli-surface.md)，不是现有统一实现。
+- 凭据与日志：密钥来自进程环境，CLI 初始化文件日志；程序不自动加载 `.env`。
+  密钥、完整请求和思考不应进入普通日志，脱敏 Debug 不替代逐个日志点审查，见 [凭据设计](../design/credentials.md)。
+- 工作区：目录工具根固定为启动 cwd，逐层拒绝链接且限制扫描/输出；这些边界不等于
+  workspace trust、秘密检测、审批或 OS 沙箱。搜索与模型请求当前可访问网络。
+- 取消：Shutdown 使用独立信号打断会话等待与事件背压；已开始的 `spawn_blocking`
+  文件系统操作不能被 async abort 强制终止，尚无保留会话的 CancelTurn。
 
-## 演进边界
+## 目标能力与演进边界
 
-crate 已按职责分开，是否完成能力以根 README 为准。后续按以下边界演进，不以创建
-空 crate 作为完成标志：
+独立上下文装配、system prompt/项目指令加载、Token 预算、记忆、JSONL 会话恢复、
+审批、文件读写、Shell、MCP 和 Bubblewrap 均未接入。`MessageRole::System` 或空 crate
+的存在不能证明这些能力已经实现。
 
-| 能力 | 所在 crate | 前置约束 |
-| --- | --- | --- |
-| 执行核心 | vortex-core | 不依赖厂商或终端类型，先用受控 fake 验证 |
-| 具体工具 | vortex-tools | 复用 Tool trait；真实搜索与文件访问先补参数/超时/输出边界 |
-| 副作用与隔离 | vortex-sandbox 与 Core 权限策略 | 审批与隔离先于补丁/Shell 启用 |
-| 界面与单次入口 | vortex-tui、vortex-cli | 共享 Session 契约，不复制工具执行逻辑 |
-
-Linux-only 依赖应留在沙箱实现层，避免整个工具 crate 失去跨平台编译能力；TUI 的
-状态机与 widget 独立测试，不把终端控件传播到 Core。
-
-## 待定项
-
-- MCP client 暂归 `vortex-tools`；若生命周期管理明显干扰工具实现，再拆为独立 crate。
-- 暂不创建 `vortex-protocol`；只有核心运行时依赖让纯类型使用方负担过重时才拆分。
-- 首版只实现 Linux + Bubblewrap；在出现第二个真实后端前不预设跨平台沙箱抽象。
+当前目标是让后续功能复用 Session/Turn 契约；exec 应迁移为同一事件流的另一种呈现。
+模块拆分建议及触发条件见 [架构演进](evolution.md)，候选功能顺序见
+[后续能力](../design/development-directions.md)，不把未来依赖画入当前结构。

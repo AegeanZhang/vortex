@@ -1,23 +1,35 @@
 # 关键技术选型
 
-本文件汇总已经确定、会约束实现的技术选择。候选方案比较和外部项目对照保留在 [`../research/`](../research/)；若将来改变选型，应先更新相应设计决策和本文件。
+核对日期：2026-10-26。本文件区分实际依赖、目标选型与尚未接入的能力。
+候选比较保留在 [调研](../research/README.md)；职责与调用关系分别见
+[逻辑模块](logical-modules.md) 和 [运行链路](runtime-flows.md)。改变技术路线时更新相应 ADR。
+
+## 当前采用
 
 | 领域 | 当前选择 | 使用边界 |
 | --- | --- | --- |
-| 语言与构建 | 稳定版 Rust、2024 edition、Cargo workspace | 本地与 CI 使用同一稳定工具链 |
+| 语言与构建 | Rust、2024 edition、Cargo workspace、resolver 3 | 采用稳定版工具链方向；仓库尚未提供 rust-toolchain.toml 或 CI 工作流 |
 | 异步运行时 | Tokio | 异步代码不得阻塞 executor；阻塞操作需要隔离到专用线程或进程 |
 | 配置解析与校验 | TOML + Serde + url | Core 负责内置/用户/受限项目/CLI 合并，URL 结构校验不执行网络；模型请求选项属于模型 profile，密钥值不进配置 |
 | 用户目录 | 统一 `.vortex` HOME | 默认系统用户主目录下 `.vortex`，VORTEX_HOME 可覆盖；CLI 统一解析路径，不按 XDG/AppData 分流 |
-| TUI | Ratatui + Crossterm | Ratatui 负责布局渲染，Crossterm 负责终端与事件；Tokio 统一事件循环 |
+| TUI | Ratatui + Crossterm + ratatui-textarea | 布局、终端事件及输入编辑分工；Tokio 统一事件循环，尚无 tick 绘制节流 |
 | Transcript Markdown | tui-markdown | 仅 vortex-tui 使用，首版关闭默认 features，Assistant 正文按消息转换，User/Error 保持纯文本 |
 | HTTP | Reqwest | Provider 传输与真实网络工具的实现依赖，不进入 Core 公共接口；旧 exec 路径仍待迁移 |
 | SSE | eventsource-stream + async-stream | Provider 内分帧并构造惰性模型流，Core 只消费语义事件 |
 | 结构化 JSON | serde_json | Core/Tools 表达工具 Schema 与参数，Provider 映射载荷；不等于已接入 Schema 验证器 |
 | 工作区目录访问 | cap-std + cap-fs-ext | Tools 持有目录句柄，逐级不跟随符号链接；不是整个进程的 OS 沙箱 |
 | 日志 | tracing + tracing-subscriber + tracing-appender | CLI 初始化一次文件 subscriber，其余 crate 发事件；不向 TUI 屏幕输出 |
-| 会话格式 | JSONL 事件日志 | 便于追加、审计与异常退出恢复 |
-| 工具协议 | JSON Schema、stdio MCP | 所有带副作用的调用统一经过权限策略 |
-| Linux 沙箱 | Bubblewrap | 默认限制写入当前工作区并禁止网络 |
+
+当前 Session 历史为内存 `Vec<ConversationItem>`，不是 JSONL 存储；ToolSpec 使用 JSON
+Schema 声明，实际参数由具体工具校验。以下目标不混入当前依赖表：
+
+| 领域 | 目标选型 | 尚未具备的能力 |
+| --- | --- | --- |
+| 会话保存 | JSONL 事件日志 | 追加、回放、恢复及事件完备性尚未实现 |
+| 外部工具接入 | stdio MCP | 尚无 client 或连接生命周期实现 |
+| 权限与 Linux 隔离 | 审批策略与 Bubblewrap | 尚无实际审批和隔离，sandbox crate 为模板；当前不默认禁止网络 |
+
+这些方向是已有目标约束，不是当前可用功能；后续职责与接入条件见 [架构演进](evolution.md)。
 
 TUI 选型依据见 [`../research/rust-tui-research.md`](../research/rust-tui-research.md)，CLI 和凭据相关决策分别见 [`../design/cli-surface.md`](../design/cli-surface.md) 与 [`../design/credentials.md`](../design/credentials.md)。
 

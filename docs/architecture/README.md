@@ -1,13 +1,34 @@
 # 架构文档
 
-本目录记录 Vortex 已确定的系统结构与技术决策，不记录实现进度。当前进度见仓库根目录的 [`README.md`](../../README.md)，候选方案与外部对照见 [`../research/`](../research/)。
+本目录从整体结构、职责和运行时协作解释 Vortex。当前架构按 2026-10-26 源码核对，
+不维护独立测试计数或开发流水账；实现与验证结果见根 [README](../../README.md)。
 
-建议按以下顺序阅读：
+## 阅读顺序与文件职责
 
-1. [`overview.md`](overview.md)：系统边界、crate 职责、依赖方向和演进顺序。
-2. [`repository-structure.md`](repository-structure.md)：仓库目录、Workspace 组织和命名约束。
-3. [`technology-stack.md`](technology-stack.md)：已经确定的关键技术选型与使用边界。
-4. [`glossary.md`](glossary.md)：跨文档共用的核心术语。
-5. [`decisions/0001-transcript-markdown-rendering.md`](decisions/0001-transcript-markdown-rendering.md)：首版采用 tui-markdown 的决策、使用边界与后续演进条件。
+| 顺序 | 文档 | 回答的问题 |
+| --- | --- | --- |
+| 1 | [架构总览](overview.md) | 系统包含什么，外部边界、当前能力与整体依赖是什么？ |
+| 2 | [逻辑模块](logical-modules.md) | 各职责由谁承担，接口、状态和源码如何对应？ |
+| 3 | [运行链路](runtime-flows.md) | 启动、输入、模型/工具循环、切换与退出如何协作？ |
+| 4 | [仓库与模块组织](repository-structure.md) | 实际目录、Cargo 依赖和源码阅读入口在哪里？ |
+| 5 | [关键技术选型](technology-stack.md) | 已采用什么技术，适用边界及未来目标是什么？ |
+| 6 | [架构演进](evolution.md) | 哪些职责值得进一步拆分，何时拆、如何保持行为？ |
+| 查询 | [术语表](glossary.md) | Session、Turn、事件、上下文等术语如何区分？ |
+| 决策 | [ADR 0001](decisions/0001-transcript-markdown-rendering.md) | 为什么首版采用 tui-markdown，何时重新评估？ |
 
-具体子系统的对外契约位于 [`../design/`](../design/)，工程实践位于 [`../engineering/`](../engineering/)。
+## 与其他文档的分工
+
+- `architecture/` 说明系统职责、依赖和协作，不复制配置字段表、完整 API 或逐行实施步骤。
+- [详细设计](../README.md#详细设计) 维护子系统契约、状态规则、协议映射和验收要求。
+- [调研](../research/README.md) 保留候选比较与外部项目证据，不作为本项目已实现的证明。
+- [工程规范](../engineering/README.md) 规定编码、测试、Review 与提交方式；
+  [用户手册](../guide/getting-started.md) 说明实际可运行的操作。
+
+## 维护规则
+
+逻辑模块是职责边界，Rust module 是源码组织，crate 是编译与依赖单元，三者不要求
+一一对应。先明确职责，再决定是否需要拆文件或拆 crate。
+
+结构变化同步模块映射，通信或生命周期变化同步运行链路，技术路线变化同步选型与 ADR。
+当前实现、已确定目标和候选建议分开标注；演进文档不授权代码重构。既有文件名继续保留，
+避免把整理导航变成大规模链接迁移。
