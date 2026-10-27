@@ -141,8 +141,9 @@ DisplayOnly 思考仅存当前 TUI 内存，不写模型历史、Snapshot、会�
 5. 人工：明确选择 Thinking profile，验证文本、目录/Mock 工具、两次用户输入及 /exit。
 
 自动化测试使用 fake 和固定 SSE JSON，不访问真实模型；预设/请求、Decoder、Core、Session
-和 TUI 已有离线回归，实际结果只在根 README 记录。原手写步骤保存在本地实施稿，
-本文件与 [配置设计](configuration.md) 不依赖该未入库文件来解释当前契约。
+和 TUI 已有离线回归，实际结果只在根 README 记录。原实施稿已回收并清理，人工验收
+顺序与失败分类见 [回归测试方案](../engineering/regression-test-plan.md#thinking-展示与工具往返)。
+本文件与 [配置设计](configuration.md) 保留当前契约，不依赖本地临时文件。
 
 ### 人工验收与已知限制
 

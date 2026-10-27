@@ -142,3 +142,19 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 上述两份本地原稿在核对后删除，旧阶段编译缺口、临时副本路径和被当前代码取代的
 逐行迁移代码不继续维护。原稿中的待补测试仍为待补，不因回收或旧测试通过而变成
 已验证能力。保留 `rust-learn.md`；新的实施稿不作为正式文档的永久依赖。
+
+## 临时稿回收记录（2026-10-26）
+
+| 原临时稿 | 正式文档去向 |
+| --- | --- |
+| `20261019-01.md` | [Provider 思考选项](design/provider-thinking-options.md)、[配置设计](design/configuration.md) 已覆盖现行装配与迁移契约；三种接入的人工验收与失败排查补入 [回归测试方案](engineering/regression-test-plan.md) |
+| `20261020-01.md` | [Agent loop 与目录工具](design/agent-loop.md) 已覆盖句柄路径、预算、错误和取消边界；真实调用链与平台专项验收补入 [回归测试方案](engineering/regression-test-plan.md) |
+| `20261023-01.md` | [Thinking 展示](design/thinking-display.md)、[Provider 思考选项](design/provider-thinking-options.md)、[配置设计](design/configuration.md) 已覆盖预设、输出策略和事件链；工具往返验收顺序与失败分类补入 [回归测试方案](engineering/regression-test-plan.md) |
+
+三份实施稿已核对并删除，不重复保存大段逐行迁移代码；早期仅支持关闭思考、目录工具
+待实现等描述由当前正式契约取代。[后续方向](design/development-directions.md) 同步区分
+已接入能力与待验证、待开发项。归档不新增测试通过记录，也不代表真实工具往返、
+Windows 路径边界或 HTTP/SSE 分帧已完成验收。
+
+`test-env.md` 的个人测试环境信息已迁入不入库的本地 Agent 补充说明；原文件删除后，
+空的 `md.local.temp` 目录一并清理。该目录可在后续编写新实施稿时重新创建。
