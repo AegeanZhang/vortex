@@ -108,6 +108,17 @@ Provider 29、Tools 16、TUI 51、沙箱占位 1）；
 作者已反馈诗词请求的 Thinking 正常显示；搜索场景仍被单步多工具调用限制阻断，记录为
 [Issue #3](https://github.com/AegeanZhang/vortex/issues/3)，工具往返尚未完成真实验收。
 
+文本选择与复制补充验证（2026-10-28）：TUI 已支持 Prompt/Transcript 的可见文本拖选、
+反色高亮与 Ctrl+C 系统剪贴板复制，Prompt 键盘选区也可复制；保留滚轮与菜单行为。
+新增离线测试覆盖字形、选区失效、草稿、后台结果和资源边界。详细契约、平台限制与
+截图见 [文本选择设计](docs/design/text-selection.md)。
+本修复分支基于远端 e4b02bc，新增 17 项离线用例，工作区共 161 项通过（CLI 15、Core 32、
+Provider 29、Tools 16、TUI 68、沙箱模板 1）；格式检查、严格 Clippy 和 Release 构建通过。
+另在隔离 Xvfb/X11 中用 Kitty 0.45.0 验证实际拖选、Prompt 键盘复制、中文/代码剪贴板读回、
+原生 Shift 拖选、无桌面剪贴板错误反馈，以及正常、错误退出和 panic 后 raw mode/termios/备用屏幕恢复。
+此验证使用离线 Fixture Session，不调用真实 API；原生 Wayland、Windows/macOS 和 tmux 尚待验收。
+
+
 ## 首版方向
 
 - Linux 优先，提供交互式 TUI；同时规划 `vortex exec "<task>"` 单次执行模式。

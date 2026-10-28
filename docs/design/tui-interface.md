@@ -1,6 +1,6 @@
 # TUI 接口设计
 
-接口核对日期：2026-10-26。本文描述当前实现契约，包含 Thinking 步骤投影；离线与真实交互的验证边界见根 README，后续能力单独标注。
+接口核对日期：2026-10-28。本文描述当前实现契约，包含 Thinking 步骤投影；离线与真实交互的验证边界见根 README，后续能力单独标注。
 
 本文档以文本流式和工具状态接口为基线，说明 `vortex-tui` 如何消费
 `vortex-core::SessionConnection`。Session actor 和 Provider 调用链见
@@ -45,7 +45,8 @@ CoreEventStream ────────────────┘             
 | --- | --- |
 | `lib.rs` | 公开入口、键盘/鼠标事件映射和 `TuiOutcome` |
 | `terminal.rs` | 初始化 raw mode/alternate screen，并用 guard 恢复终端 |
-| `event_loop.rs` | 等待终端/Core 事件、调用 reducer、顺序执行 Effect |
+| `event_loop.rs` | 等待终端/Core/剪贴板结果、调用 reducer、顺序执行 Effect |
+| `selection.rs` / `clipboard.rs` | 可见文本选区及串行后台系统剪贴板写入 |
 | `app.rs` | `AppState` 和唯一状态修改入口 `update` |
 | `action.rs` | `UiAction` 与 `Effect` |
 | `command.rs` | Exit/Model 静态定义、带参数的 ParsedCommand、单行解析与补全前缀 |
@@ -72,6 +73,7 @@ event bus。等第二个页面、焦点切换或真正可复用的控件出现�
 - 鼠标滚轮向上/向下 → Transcript 滚动 3 个渲染行，当前不按鼠标位置分区。
 - `Event::Resize` → `UiAction::RedrawRequested` → `Effect::Redraw`，下一次绘制按新尺寸布局。
 - Release 全部忽略；Enter/Tab/Esc 的 Repeat 忽略，普通字符和方向键 Repeat 保留。
+- 左键按下/拖动/释放 → 可见文本选区，Ctrl+C → 系统剪贴板复制；细节见 [文本选择设计](text-selection.md)。
 - 其他鼠标事件和 Paste 当前忽略，尚未启用 bracketed paste。
 
 普通 Prompt 提交时，TUI 只生成 `SendCommand(SubmitPrompt)`，不会乐观地把用户文本写入 Transcript。
@@ -81,7 +83,7 @@ event bus。等第二个页面、焦点切换或真正可复用的控件出现�
 发送与 Core 接受之间的 pending_submit、Core 拒绝后的草稿恢复尚未实现，不能把本地
 Running 检查视为完整的提交确认机制。
 
-`Effect` 当前只有三种：发送 `AgentCommand`、请求重绘和退出。Effect 按返回顺序执行；退出
+`Effect` 当前包括发送 `AgentCommand`、请求重绘、退出与显式复制文本。Effect 按返回顺序执行；退出
 会先发送 `Shutdown`，成功后才结束 event loop。Shutdown 通过独立 watch 信号通知 Core，
 发送成功不等于后台任务已经回收；它不是取消完成的确认。命令发送失败时返回 `TuiError`。
 
@@ -169,6 +171,12 @@ Prompt 固定底部；菜单左对齐覆盖 main_area 底部，不缩小 Transcr
 Paste、动态多行高度、更多 slash 命令和鼠标菜单选择尚未实现。粘贴隔离是后续独立工作，
 不能因单行命令校验或 Enter Repeat 过滤就保证粘贴的换行不会提交。
 交互取舍与后续输入方案见 [调研](../research/tui-layout-and-input-research.md)。
+
+## 文本选择与复制
+
+Prompt/Transcript 可用左键拖选、Ctrl+C 复制；Prompt 的 Shift+方向键选区也接入系统剪贴板。
+复制失败通过 notice 呈现，保持草稿与会话状态；选择区域变化或滚动/Resize 后取消旧选区，
+避免坐标错位。命中范围、复制内容和各平台限制见 [文本选择设计](text-selection.md)。
 
 ## PromptEditor 边界
 

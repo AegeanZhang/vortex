@@ -16,11 +16,13 @@ use vortex_core::{AgentHandle, SessionConnection};
 struct EffectResult {
     redraw: bool,
     exit: bool,
+    clipboard_error: Option<&'static str>,
 }
 
 async fn execute_effects(
     agent: &AgentHandle,
     effects: Vec<Effect>,
+    clipboard: &mut crate::clipboard::Clipboard,
 ) -> Result<EffectResult, TuiError> {
     let mut result = EffectResult::default();
 
@@ -28,6 +30,12 @@ async fn execute_effects(
         match effect {
             Effect::SendCommand(command) => {
                 agent.send(command).await?;
+            }
+            Effect::CopyText(text) => {
+                if let Err(message) = clipboard.copy(text) {
+                    // 通过同一个结果通道呈现错误，避免正文进入日志。
+                    result.clipboard_error = Some(message);
+                }
             }
             Effect::Redraw => {
                 result.redraw = true;
@@ -54,6 +62,7 @@ pub(crate) async fn run_event_loop(
     let mut state = AppState::from(snapshot);
     let mut terminal_events = EventStream::new();
     let mut redraw = true;
+    let mut clipboard = crate::clipboard::Clipboard::default();
 
     loop {
         if redraw {
@@ -69,6 +78,10 @@ pub(crate) async fn run_event_loop(
                     None => return Err(TuiError::TerminalEventStreamClosed),
                 }
             }
+            result = clipboard.results.recv() => {
+                clipboard.completed();
+                result.map(|result| crate::action::UiAction::ClipboardResult(result.map_err(str::to_owned)))
+            }
             core_event = events.recv() => {
                 match core_event {
                     Some(event) => Some(crate::action::UiAction::CoreEvent(event)),
@@ -82,8 +95,14 @@ pub(crate) async fn run_event_loop(
         };
 
         let effects = update(&mut state, action);
-        let effect_result = execute_effects(&agent, effects).await?;
+        let effect_result = execute_effects(&agent, effects, &mut clipboard).await?;
 
+        if let Some(message) = effect_result.clipboard_error {
+            update(
+                &mut state,
+                crate::action::UiAction::ClipboardResult(Err(message.into())),
+            );
+        }
         if effect_result.exit {
             return Ok(TuiOutcome::UserExit);
         }

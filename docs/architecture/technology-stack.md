@@ -88,3 +88,10 @@ CLI 初始化非阻塞 JSON 文件日志，WorkerGuard 保持到 main 结束；�
 `<vortex-home>/logs/vortex.log`，HOME 来自统一路径解析。RUST_LOG 与 verbose 的实际优先级、
 TRACE 输入风险见 [上手指南](../guide/getting-started.md#日志与本地配置)。TOML 已接入 TUI；
 JSONL 会话、MCP/Bubblewrap 仍是后续目标，不能由依赖表推断能力已经可用。
+
+## 文本选择与系统剪贴板
+
+TUI 内部通过渲染单元格快照进行可见文字选择，系统复制使用 arboard 3.7，关闭默认图像
+features，启用 wayland-data-control；版本由 Cargo.lock 固定。Clipboard 对象在专用线程上
+按需创建并保留，后台结果回到 TUI reducer；Core/Provider 不依赖剪贴板或终端类型。
+Linux 的会话支持、无剪贴板反馈和退出后的所有权限制见 [文本选择设计](../design/text-selection.md)。
