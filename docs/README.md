@@ -38,7 +38,8 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 - 模型协议：[SSE/流接口](design/provider/streaming-response.md)、[思考选项](design/provider/thinking-options.md)。
 - 工具：[注册表](design/tools/tool-registry.md)、[目录列表](design/tools/list-directory.md)、[网页搜索](design/tools/web-search.md)。
 - 交互：[TUI](design/tui/interface.md)、[Thinking 展示](design/tui/thinking-display.md)、
-  [滚动](design/tui/transcript-scrolling.md)、[终端画面恢复](design/tui/terminal-redraw-recovery.md)。
+  [滚动](design/tui/transcript-scrolling.md)、[文本选择与复制](design/tui/text-selection.md)、
+  [终端画面恢复](design/tui/terminal-redraw-recovery.md)。
 - 横切与候选：[凭据](design/cross-cutting/credentials.md)、[开发期 HTTP 诊断](design/cross-cutting/diagnostics.md)、
   [开发方向](design/development-directions.md)。
 

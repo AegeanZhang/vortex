@@ -53,7 +53,8 @@ pub(crate) fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     let [header_area, main_area, status_area, prompt_area] = sections(frame.area());
 
     // 绘制顶部标题栏
-    let header = Paragraph::new("Vortex").block(Block::default().borders(Borders::ALL));
+    let header = Paragraph::new("Vortex | 拖选文本 · Ctrl+C 复制 · Shift+方向键选择 Prompt")
+        .block(Block::default().borders(Borders::ALL));
     frame.render_widget(header, header_area);
 
     state.transcript_mut().render(frame, main_area);
@@ -79,12 +80,170 @@ pub(crate) fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     {
         state.model_picker().render(frame, area);
     }
+
+    // 在高亮之前截取实际渲染单元格，复制可见纯文本而不是 Markdown/装饰。
+    let regions = if state.model_picker().is_open() || state.command_menu().is_open() {
+        Vec::new()
+    } else {
+        let inner = main_area.inner(ratatui::layout::Margin::new(1, 1));
+        let transcript = Rect {
+            width: inner.width.saturating_sub(1),
+            ..inner
+        };
+        let mut regions = vec![transcript];
+        // placeholder 是提示，不是待复制的用户草稿。
+        if !state.prompt_editor().text().is_empty() {
+            regions.push(prompt_area.inner(ratatui::layout::Margin::new(1, 1)));
+        }
+        regions
+    };
+    state.selection.capture(frame.buffer_mut(), &regions);
+    state.selection.highlight(frame.buffer_mut());
+    // 居中模型窗口可覆盖状态栏，不能在其上重画状态文字。
+    if !state.model_picker().is_open() {
+        frame.render_widget(Paragraph::new(state.status_line()), status_area);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
+
+    fn select(state: &mut AppState, start: (u16, u16), end: (u16, u16)) {
+        use crate::{action::UiAction, app::update};
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        for (kind, (column, row)) in [
+            (MouseEventKind::Down(MouseButton::Left), start),
+            (MouseEventKind::Drag(MouseButton::Left), end),
+            (MouseEventKind::Up(MouseButton::Left), end),
+        ] {
+            update(
+                state,
+                UiAction::SelectText(MouseEvent {
+                    kind,
+                    column,
+                    row,
+                    modifiers: KeyModifiers::NONE,
+                }),
+            );
+        }
+    }
+
+    #[test]
+    fn selection_status_refresh_does_not_overwrite_model_picker_border() {
+        let mut state = AppState::default();
+        for ch in "/model".chars() {
+            edit_key(&mut state, crossterm::event::KeyCode::Char(ch));
+        }
+        crate::app::update(&mut state, crate::action::UiAction::SubmitPrompt);
+        assert!(state.model_picker().is_open());
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| render(frame, &mut state)).unwrap();
+        let picker = model_picker_area(Rect::new(0, 0, 80, 24)).unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(picker.x, picker.bottom() - 1)].symbol(),
+            "└"
+        );
+    }
+
+    #[test]
+    fn empty_prompt_placeholder_cannot_be_copied_as_user_text() {
+        let mut state = AppState::default();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| render(frame, &mut state)).unwrap();
+        select(&mut state, (1, 22), (15, 22));
+        assert!(state.selection.text().is_none());
+    }
+
+    #[test]
+    fn mouse_selects_rendered_markdown_and_prompt_without_chrome_or_submission() {
+        use crate::{
+            action::{Effect, UiAction},
+            app::update,
+        };
+        use vortex_core::CoreEvent;
+        let mut state = AppState::default();
+        update(
+            &mut state,
+            UiAction::CoreEvent(CoreEvent::AssistantMessageStarted),
+        );
+        update(
+            &mut state,
+            UiAction::CoreEvent(CoreEvent::AssistantTextDelta {
+                delta: "**Hello** 中文".into(),
+            }),
+        );
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| render(frame, &mut state)).unwrap();
+        select(&mut state, (1, 5), (5, 5));
+        terminal.draw(|frame| render(frame, &mut state)).unwrap();
+        assert!(
+            terminal.backend().buffer()[(1, 5)]
+                .modifier
+                .contains(ratatui::style::Modifier::REVERSED)
+        );
+        assert_eq!(
+            update(&mut state, UiAction::CopySelection),
+            vec![Effect::CopyText("Hello".into()), Effect::Redraw]
+        );
+        // 只复制渲染纯文本，星号和外框不在内容区域。
+        assert_eq!(state.selection.text().as_deref(), Some("Hello"));
+        for ch in "prompt".chars() {
+            edit_key(&mut state, crossterm::event::KeyCode::Char(ch));
+        }
+        terminal.draw(|frame| render(frame, &mut state)).unwrap();
+        select(&mut state, (1, 22), (6, 22));
+        assert_eq!(
+            update(&mut state, UiAction::CopySelection),
+            vec![Effect::CopyText("prompt".into()), Effect::Redraw]
+        );
+        assert_eq!(state.prompt_editor().text(), "prompt");
+    }
+
+    #[test]
+    fn selection_is_invalidated_on_stream_update_scroll_resize_and_menu_overlay() {
+        use crate::{
+            action::{ScrollCommand, UiAction},
+            app::update,
+        };
+        use vortex_core::CoreEvent;
+        let mut state = AppState::default();
+        update(
+            &mut state,
+            UiAction::CoreEvent(CoreEvent::AssistantMessageStarted),
+        );
+        update(
+            &mut state,
+            UiAction::CoreEvent(CoreEvent::AssistantTextDelta {
+                delta: "first".into(),
+            }),
+        );
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| render(frame, &mut state)).unwrap();
+        select(&mut state, (1, 5), (5, 5));
+        update(
+            &mut state,
+            UiAction::CoreEvent(CoreEvent::AssistantTextDelta {
+                delta: " second".into(),
+            }),
+        );
+        terminal.draw(|frame| render(frame, &mut state)).unwrap();
+        assert!(state.selection.text().is_none());
+        for action in [
+            UiAction::ScrollTranscript(ScrollCommand::PageUp),
+            UiAction::RedrawRequested,
+        ] {
+            select(&mut state, (1, 5), (5, 5));
+            update(&mut state, action);
+            assert!(state.selection.text().is_none());
+        }
+        select(&mut state, (1, 5), (5, 5));
+        edit_key(&mut state, crossterm::event::KeyCode::Char('/'));
+        terminal.draw(|frame| render(frame, &mut state)).unwrap();
+        select(&mut state, (1, 5), (5, 5));
+        assert!(state.selection.text().is_none());
+    }
 
     #[test]
     fn splits_standard_terminal_into_four_sections() {

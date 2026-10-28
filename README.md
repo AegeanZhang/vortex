@@ -128,6 +128,21 @@ Workspace `test --all-features` 共 169 项（CLI 17、Core 32、Diagnostics 11�
 通过。本轮未进行真实终端、完整工具往返或跨平台验收；中文跨网络字节、CRLF/多行 data
 以及完整传输异常/超时矩阵仍待补充。
 
+文本选择与复制补充验证（2026-10-28）：TUI 已支持 Prompt/Transcript 的可见文本拖选、
+反色高亮与 Ctrl+C 系统剪贴板复制，Prompt 键盘选区也可复制；保留滚轮与菜单行为。
+新增离线测试覆盖字形、选区失效、草稿、后台结果和资源边界。详细契约、平台限制与
+截图见 [文本选择设计](docs/design/tui/text-selection.md)。
+本修复分支基于远端 e4b02bc，新增 17 项离线用例，工作区共 161 项通过（CLI 15、Core 32、
+Provider 29、Tools 16、TUI 68、沙箱模板 1）；格式检查、严格 Clippy 和 Release 构建通过。
+另在隔离 Xvfb/X11 中用 Kitty 0.45.0 验证实际拖选、Prompt 键盘复制、中文/代码剪贴板读回、
+原生 Shift 拖选、无桌面剪贴板错误反馈，以及正常、错误退出和 panic 后 raw mode/termios/备用屏幕恢复。
+此验证使用离线 Fixture Session，不调用真实 API；原生 Wayland、Windows/macOS 和 tmux 尚待验收。
+
+合并验证（2026-10-28）：本地诊断/架构整理与 PR #5 合并后，工作区 186 项离线测试通过
+（CLI 17、Core 32、Diagnostics 11、Provider 单元 29 与集成 6、Tools 22、TUI 68、沙箱模板 1）。
+格式检查、全工作区严格 Clippy、Release 构建及文档链接检查通过；本次未重复调用真实 API
+或进行终端交互验收，终端验证范围仍以上述隔离 Kitty 记录为准。
+
 ## 首版方向
 
 - Linux 优先，提供交互式 TUI；同时规划 `vortex exec "<task>"` 单次执行模式。

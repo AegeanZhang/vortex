@@ -74,8 +74,8 @@ enum ScrollCommand {
 `viewport_height.saturating_sub(1).max(1)`，保留一行上下文。
 
 滚轮每个事件移动 3 个渲染行，首版作用于整个 TUI，不按鼠标坐标分区。键盘翻页复用
-`scroll_up(lines)` / `scroll_down(lines)` 的边界与跟随规则；点击、拖动、水平滚动和移动
-事件忽略。以后菜单或输入框需要独立滚动时，再增加命中区域与事件优先级。
+`scroll_up(lines)` / `scroll_down(lines)` 的边界与跟随规则；左键拖动由 [文本选择](text-selection.md) 处理；水平滚动和移动事件仍忽略。
+滚动会取消旧鼠标选区，避免视口坐标变化后误复制。以后菜单或输入框需要独立滚动时，再增加命中区域与事件优先级。
 
 `TerminalGuard` 进入时开启 `EnableMouseCapture`，显式清理和 `Drop` 均关闭
 `DisableMouseCapture`。鼠标捕获可能影响终端原生选择，不能承诺各终端绕过方式相同。

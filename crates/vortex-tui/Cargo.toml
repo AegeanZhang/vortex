@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 vortex-core.workspace = true
 
+arboard.workspace = true
 crossterm = { workspace = true, features = ["event-stream"] }
 futures-util.workspace = true
 ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
