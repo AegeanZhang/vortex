@@ -8,6 +8,8 @@ use clap::{Parser, Subcommand};
 use exec::execute;
 use std::error::Error;
 
+#[cfg(debug_assertions)]
+use vortex_diagnostics::wire_trace;
 use vortex_tui::options::TuiOptions;
 use vortex_tui::run;
 

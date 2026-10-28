@@ -112,7 +112,7 @@ SSE 分帧可复用，不代表所有厂商的模型协议可共用一个 Decode
 第一轮拆分保持等价：request 拥有请求 DTO，stream 的上下文拥有 Client、认证及选项，
 第一次 poll 才发请求；正常传输 EOF 仍交给 Decoder 判定，不自动算成功。
 SecretString 如需 Clone 仍保留手写脱敏 Debug，不为打印日志开放字段或派生原文 Debug。
-只记录有语义的元数据，不把 Debug 当成字段访问权限或新增 TRACE trait。
+普通日志只记录有语义的元数据；显式 Debug 正文诊断走共享 WireTrace，不把 Debug 当成字段访问权限或新增 TRACE trait。
 
 出现第二个真实协议、确认共有驱动重复后，再考虑内部 SseProtocolDecoder 抽象；不先
 新增公开 SseProvider，也不在 Core 暴露厂商 event/signature。第一轮拆分不改变超时、
@@ -139,8 +139,14 @@ UI 的模型步骤、思考分区与待实施节流见 [Thinking 展示](../tui/
 
 ## 日志、安全与验收
 
-Provider 只记录必要元数据，不记录请求/响应正文、思考或密钥；SecretString 保留手写脱敏
-Debug。错误不能透传认证头、原始服务错误体或 Reqwest 敏感链。模型控制字符过滤是独立问题，
+普通 Provider 日志只记录必要元数据，不记录请求/响应正文、思考或密钥；SecretString 保留手写脱敏
+Debug。显式 Debug wire TRACE 是 [诊断设计](../cross-cutting/diagnostics.md) 规定的正文例外：
+首次 poll 记录最终 ChatRequest；响应头到达后记录状态；完整 SSE Event.data 在 Decoder 前记录，
+含公开思考、工具参数和 DONE，但不含 SSE id/event/retry、注释或尚未解析的原始字节。
+正常流仍按事件 yield，不重复读取或等待完整回答。HTTP/MIME 异常由独立任务有界预览，
+业务立即返回原错误；取消与进程退出不保证错误预览完整。
+
+错误不能透传认证头、原始服务错误体或 Reqwest 敏感链。模型控制字符过滤是独立问题，
 不能因 SSE/Markdown 可用就宣称已防护，通用凭据规则见 [凭据设计](../cross-cutting/credentials.md)。
 
 离线验证 DTO、双字段 delta、参数跨包拼接、ID、终态/EOF 与错误分类；本地 HTTP fixture

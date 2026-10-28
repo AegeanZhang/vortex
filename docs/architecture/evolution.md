@@ -1,6 +1,6 @@
 # 架构演进与模块拆分建议
 
-本文基于 2026-10-26 源码提出后续建议，不是当前模块清单，不授权修改源码或新增 crate。
+本文基于 2026-10-27 源码提出后续建议，不是当前模块清单，不授权修改源码或新增 crate。
 现状见 [逻辑模块](logical-modules.md)；功能候选与依赖见 [后续能力](../design/development-directions.md)。
 
 ## 判断依据
@@ -46,6 +46,17 @@ Transcript 当前承担展示条目、Markdown 组装、滚动度量与绘制；
 
 DeepSeek 等接入的 Thinking 历史支持是协议与上下文契约变更，不能作为 UI 拆分的附带
 修复；签名、opaque 状态和文本思考也不应强行统一为正文。
+
+## 已落地的诊断边界与后续扩展
+
+共享 `vortex-diagnostics` 已承接三个 HTTP 路径的请求关联、正文日志副本与后台错误预览，
+CLI 仍管理 subscriber/文件；Core 与 TUI 没有新增诊断依赖。当前能力见
+[诊断设计](../design/cross-cutting/diagnostics.md)，不是待创建的空模块。
+
+后续在明确需要跨模块耗时、诊断报告或 OTel 导出时，可在该 crate 增加相应职责，
+先明确业务关联 ID、隐私、资源预算及退出规则。当前没有这些能力，也未建立完整可观测性平台。
+只裁剪 wire_trace，不把整个 crate 固定为 Debug 专用；若要 Release 正文诊断，另定显式
+开关与验收，不悄悄开启 release debug-assertions。普通元数据事件无需统一绕行 WireTrace。
 
 ## 暂不拆为新 crate 的内容
 

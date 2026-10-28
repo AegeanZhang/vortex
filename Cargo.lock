@@ -2631,6 +2631,7 @@ dependencies = [
  "clap",
  "reqwest",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",
@@ -2638,6 +2639,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "vortex-core",
+ "vortex-diagnostics",
  "vortex-provider",
  "vortex-tools",
  "vortex-tui",
@@ -2658,6 +2660,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vortex-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "vortex-provider"
 version = "0.1.0"
 dependencies = [
@@ -2669,7 +2683,9 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "vortex-core",
+ "vortex-diagnostics",
 ]
 
 [[package]]
@@ -2688,7 +2704,9 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "vortex-core",
+ "vortex-diagnostics",
 ]
 
 [[package]]

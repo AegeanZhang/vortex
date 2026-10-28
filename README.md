@@ -16,6 +16,11 @@ Transcript 已接入 Assistant Markdown、键盘翻页与鼠标滚轮；已补 T
 契约与限制见 [`Thinking 展示设计`](docs/design/tui/thinking-display.md)。
 Shutdown 可通知 Session 中止活跃流，但尚无保留会话的 `CancelTurn`；exec 未迁移到流式链路。
 
+共享 `vortex-diagnostics` 已接入模型、秘塔与旧 exec 的请求/响应诊断：仅 Debug 且主动开启
+`vortex_wire=trace` 时记录正文副本，默认 Release 不包含相关调用。普通日志仍无正文。
+记录有截断与有限密钥字面值替换，可能包含 Prompt、历史、思考及工具数据；
+不是完整抓包或会话存储。用法和边界见 [诊断设计](docs/design/cross-cutting/diagnostics.md)。
+
 Slash 支持 `/exit`、`/model` 与 `/model <profile-id>`：草稿首字符为 `/` 时显示根命令菜单，
 Tab 只补全；`/mo` 按 Enter 先补为 `/model`，再次按 Enter 打开独立模型窗口。
 窗口用 Up/Down 选择、Enter 申请、Esc 关闭并保留草稿；Core 确认前不更新当前模型。
@@ -108,6 +113,21 @@ Provider 29、Tools 16、TUI 51、沙箱占位 1）；
 作者已反馈诗词请求的 Thinking 正常显示；搜索场景仍被单步多工具调用限制阻断，记录为
 [Issue #3](https://github.com/AegeanZhang/vortex/issues/3)，工具往返尚未完成真实验收。
 
+HTTP 诊断补充验证（2026-10-27）：本轮新增 25 项离线测试：Diagnostics 11、Provider
+HTTP 接入 6、秘塔 HTTP 6、旧 exec 字节解析 2。覆盖请求关联与已知 key 替换、INFO 不序列化、
+UTF-8/预算截断、有界后台错误预览、首段提前交付、思考/工具参数诊断、HTTP/MIME/坏 JSON、
+流 Drop、搜索大小限制与总超时。测试仅使用假 key、本地回环 fixture 与局部 subscriber，
+没有调用真实 API；HTTP fixture 的执行环境需要允许绑定本地端口。
+
+以下 Cargo 检查均带 `--locked --offline` 并通过：Diagnostics 独立 lib check/test；Workspace
+Debug/Release 的 `check --all-targets` 与 `clippy --all-targets --all-features -- -D warnings`；
+Workspace `test --all-features` 共 169 项（CLI 17、Core 32、Diagnostics 11、Provider 单元 29
+与集成 6、Tools 22、TUI 51、沙箱占位 1）。默认 Release 另运行 Provider 的 wire_trace
+集成测试 6 项，以及秘塔 HTTP 测试 6 项，验证 TRACE 开启仍无 wire 事件且业务正常。
+`cargo build --release --locked --offline`、`cargo fmt --all -- --check` 和 `git diff --check`
+通过。本轮未进行真实终端、完整工具往返或跨平台验收；中文跨网络字节、CRLF/多行 data
+以及完整传输异常/超时矩阵仍待补充。
+
 ## 首版方向
 
 - Linux 优先，提供交互式 TUI；同时规划 `vortex exec "<task>"` 单次执行模式。
@@ -137,6 +157,7 @@ docs/                      # 文档，分类索引见 docs/README.md
 crates/                    # 产品 crate
 ├── vortex-cli/            # 参数、统一路径/日志、配置 bootstrap 与具体实现装配
 ├── vortex-core/           # 配置、模型管理、Session/Agent loop 与 Provider/Tool 接口
+├── vortex-diagnostics/     # 共享开发期 HTTP 诊断，wire 模块仅在 Debug 编译
 ├── vortex-provider/       # OpenAI-compatible Provider 适配
 ├── vortex-tui/            # 交互界面、状态更新与渲染
 ├── vortex-tools/          # 工作区目录列表与秘塔网页搜索，保留 MockWebSearch
@@ -189,9 +210,11 @@ cargo run -p vortex-cli --locked -- -c 'search.backend="mock"'
 维护，不要把陌生仓库里的 `.vortex` 指定为用户 HOME。
 
 日志以 JSON 行追加到 `<vortex-home>/logs/vortex.log`，默认级别为 `info`；未使用 `-v`
-时可用 `RUST_LOG` 调整，单个 `-v` 强制 `debug`。本轮已移除 TUI 提交分支记录输入原文的
-TRACE；这只解决已知日志点，不代表所有日志/错误路径已完整脱敏验收，也不应默认开启
-正文诊断。新增日志仍不得记录密钥、Prompt、工具结果或模型正文。
+时可用 `RUST_LOG` 调整，单个 `-v` 强制 `debug` 并覆盖它。普通日志不得记录密钥、Prompt、
+工具结果或模型正文；已移除 TUI 提交分支的输入原文 TRACE，不代表完整隐私审计。
+开发期显式正文诊断例外使用 `RUST_LOG=info,vortex_wire=trace cargo run -p vortex-cli --locked`，
+不加 `-v`。已知密钥只作字面值替换，日志可能包含敏感正文，分享前须检查；预算、队列丢弃、
+后台预览和退出限制见 [上手指南](docs/guide/getting-started.md#开发期请求与响应诊断)。
 
 ## Roadmap
 

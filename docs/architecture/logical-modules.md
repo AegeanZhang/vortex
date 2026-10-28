@@ -1,6 +1,6 @@
 # 逻辑模块与职责边界
 
-核对日期：2026-10-26。本文按职责划分当前系统，不要求一个逻辑模块对应一个文件或
+核对日期：2026-10-27。本文按职责划分当前系统，不要求一个逻辑模块对应一个文件或
 crate。物理组织见 [仓库结构](repository-structure.md)，后续拆分建议见 [架构演进](evolution.md)。
 
 ## 模块与实现对应
@@ -15,6 +15,7 @@ crate。物理组织见 [仓库结构](repository-structure.md)，后续拆分�
 | 模型协议适配 | `vortex-provider/src/openai_chat/`、`sse_transport.rs`；Core 的 `provider.rs` 定义契约 | ModelProvider → 外部 HTTP → ModelStream |
 | 工具执行与资源访问 | `vortex-core/src/tool.rs`、`vortex-tools/src/` | ToolRegistry → Tool → 归一化 ToolResult |
 | 终端交互与展示 | `vortex-tui/src/` | SessionConnection、终端事件 → UiAction/Effect → 画面 |
+| 横切诊断 | `vortex-diagnostics/src/wire_trace.rs`、CLI `logging.rs` 及三个 HTTP 调用点 | 请求/响应副本 → tracing → CLI 文件 writer |
 
 ## 1. 应用入口与装配
 
@@ -118,6 +119,20 @@ AppState 持有草稿、pending、notice、模型展示副本及响应阶段；T
 TUI 不读取配置/密钥，不依赖具体 Provider/Tool，不持久化 Thinking。交互及状态边界见
 [TUI 设计](../design/tui/interface.md)、[滚动设计](../design/tui/transcript-scrolling.md)。
 
+## 横切职责：开发期 HTTP 诊断
+
+CLI、模型协议适配与秘塔工具在各自 HTTP 边界调用共享 WireTrace。Diagnostics 不解析
+模型语义、不执行工具、不持有权威历史，也不向 TUI 发布事件；它关联一次 HTTP 请求，
+处理日志副本的已知密钥字面值、截断和错误预览。正常元数据日志仍由各模块直接发 tracing。
+
+CLI 负责唯一 subscriber、过滤、目录与 writer，main 持有日志 guard；WireTrace 仅持有
+每请求 ID、序号、状态、已知密钥副本与日志预算。错误预览任务短暂持有 response，
+独立于 Turn 的取消集合；进程退出不保证其完成。
+
+正文调用只在 debug_assertions 下编译，再由 vortex_wire TRACE 过滤。普通日志保持无正文；
+显式开启时公开思考、历史与工具内容可能落盘，不能将此副本视为对话历史或会话存储。
+完整接口及限制见 [诊断设计](../design/cross-cutting/diagnostics.md)。
+
 ## 状态与资源归属汇总
 
 | 状态或资源 | 当前持有者 | 其他模块如何访问 |
@@ -129,6 +144,7 @@ TUI 不读取配置/密钥，不依赖具体 Provider/Tool，不持久化 Thinki
 | Provider client、密钥、请求策略 | Provider 实例 | ModelProvider trait；Turn 内实例固定 |
 | 根目录句柄与阻塞额度、搜索 client | 具体 Tool 实例 | ToolRegistry 调用，不暴露给 TUI |
 | 草稿、展示文本、滚动、模型 pending | AppState/widgets | reducer 与渲染在 TUI loop 内访问 |
+| 单次 HTTP 诊断 ID/预算、错误预览 response | WireTrace / 独立 Tokio 任务 | 调用点提供副本，CLI subscriber 接收事件；不进入 Core 状态 |
 
 错误、日志、背压及数据外发是模块间共同约束，见 [总览](overview.md#横切约束)。
 权限审批、事件存储和长期记忆尚未成为当前实现模块，不在此表预设可用对象。

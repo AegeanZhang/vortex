@@ -1,7 +1,7 @@
 # 详细设计文档
 
 本目录按逻辑职责组织接口与行为契约，对齐 [架构模块](../architecture/logical-modules.md)。
-目录不是 crate 列表：运行时目录聚合模型管理、Session 与 Turn，凭据属于跨模块约束。
+目录不是 crate 列表：运行时目录聚合模型管理、Session 与 Turn，凭据和诊断属于跨模块约束。
 架构解释整体协作；本目录说明具体接口、不变量、状态、错误和验收；实际结果见根
 [README](../../README.md)，逐行手写步骤留在本地实施稿。
 
@@ -17,7 +17,7 @@
 | 模型协议适配 | [模型流与 SSE](provider/streaming-response.md)、[思考选项](provider/thinking-options.md) | wire 映射、传输、Decoder、厂商字段及能力/历史契约 |
 | 工具执行与资源访问 | [注册表](tools/tool-registry.md)、[目录列表](tools/list-directory.md)、[网页搜索](tools/web-search.md) | 公共调用/结果、具体参数及资源边界 |
 | 终端交互与展示 | [接口](tui/interface.md)、[Thinking](tui/thinking-display.md)、[滚动](tui/transcript-scrolling.md)、[画面恢复](tui/terminal-redraw-recovery.md) | 状态投影、输入、绘制与待验证终端问题 |
-| 横切约束 | [凭据](cross-cutting/credentials.md) | 环境 key、.env 定位、按需读取与脱敏 |
+| 横切约束 | [凭据](cross-cutting/credentials.md)、[诊断](cross-cutting/diagnostics.md) | 环境 key、按需读取、普通日志与 Debug 正文诊断、预算和生命周期 |
 | 功能候选 | [开发方向](development-directions.md) | 依赖与候选功能，不作为现状或固定排期 |
 
 ## 推荐阅读顺序

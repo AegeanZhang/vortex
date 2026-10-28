@@ -1,6 +1,6 @@
 # 网页搜索工具设计
 
-核对日期：2026-10-26。状态：当前实现契约。架构归属：工具执行与资源访问。
+核对日期：2026-10-27。状态：当前实现契约。架构归属：工具执行与资源访问。
 源码入口：[metaso_web_search.rs](../../../crates/vortex-tools/src/metaso_web_search.rs)、[mock_web_search.rs](../../../crates/vortex-tools/src/mock_web_search.rs)。实际检查结果见根 [README](../../../README.md)，验收要求不代表已经通过。
 
 当前提供同名 web_search 的秘塔与 Mock 两种实现，按配置只装配其一；默认秘塔，
@@ -25,7 +25,8 @@
 工具向固定 HTTPS 搜索地址发送 `q`，范围为 `webpage`，size 为配置条数的字符串（默认
 `"5"`，允许 `"1"`～`"5"`），关闭摘要
 增强与来源全文抓取，不调用秘塔问答接口。认证头标记 sensitive，类型使用脱敏 Debug；
-日志只记录后端、状态码、耗时、字节数和脱敏错误，不记录查询或响应正文。
+普通日志只记录后端、状态码、耗时、字节数和脱敏错误，不记录查询或响应正文。
+显式 Debug wire TRACE 可记录请求和原始正文，见 [开发期诊断](#开发期诊断)。
 
 当前适配器读取 `webpages` 数组以及 `link/title/snippet`；缺少数组或非法 JSON 是协议
 错误，合法空数组是成功的空结果。成功 ToolResult.output 是 JSON 字符串，包含
@@ -42,11 +43,23 @@
   标题最多 160 字符、片段最多 800 字符、URL 最多 2,048 字节。
 - 最终序列化 JSON 最多 16 KiB；超预算移除末尾结果并标记截断，不切断 JSON 字符串。
 - HTTP、传输、协议及超时错误通过现有 ToolError 转成错误 ToolResult，并回填模型。
-- 请求直接 await，不另起后台任务；Shutdown 中止 `run_turn` 时丢弃等待中的 future，
+- 正常业务请求直接 await；诊断错误预览可短暂独立运行，见下文。Shutdown 中止 `run_turn` 时丢弃等待中的 future，
   不承诺远端停止工作或不扣费。
 
 正常搜索与完整响应契约的验证范围见根 README。HTTP 200 内的业务错误、空结果和可空
 字段应以后续脱敏样例确认，不凭正常搜索一次成功认定所有异常响应均已覆盖。
+
+## 开发期诊断
+
+秘塔接入共享 [WireTrace](../cross-cutting/diagnostics.md)，仅 Debug + `vortex_wire=trace`
+开启。记录与发送使用同一请求 DTO；状态后记录有界读取完成、规范化前的原始正文，因此
+坏 JSON 也可排查。读取失败或超出 256 KiB 时记录 body_unavailable，不为日志重读正文。
+HTTP 非成功或 MIME 错误启动最多 16 KiB/300 ms 的后台预览，业务仍立即返回原错误。
+
+请求/响应诊断共享一个本地 request_id，已知 key 与 Bearer 字面值在副本中替换；原业务
+请求与工具输出不变。正文可含查询和检索片段，仍需遵守诊断设计的隐私边界。
+诊断不放宽正文/输出预算和工具总超时；后台预览不属于 Turn 取消集合，退出可能丢失其日志。
+Mock 不发 HTTP，也没有 search wire 请求记录。
 
 ## 接入决策与限制解释
 

@@ -124,13 +124,16 @@ fixture 必须使用正确的 SSE 空行边界；多行 data 合并后仍须为�
 
 1. 捕获 POST 路径、Bearer 假 Key、Content-Type 和完整 JSON 请求，确认认证头 sensitive。
 2. 401/403/429/5xx 返回脱敏错误；3xx 不跟随，另观察重定向目标未收到请求。
-3. 错误 MIME、坏 JSON、200 但缺结果数组失败，不记录原始错误体或 Reqwest 敏感链。
+3. 错误 MIME、坏 JSON、200 但缺结果数组失败；普通日志/返回错误不含原始错误体或 Reqwest 敏感链。
 4. 同时覆盖有 Content-Length 和 chunked 超预算；以实际消费的累计字节数判断。
 5. 延迟响应头、已发头但正文迟迟不到都受总超时限制；不要只验证 `send()`。
 6. 服务端确认已捕获请求后，再 abort 调用方并观察取消；不能宣称远端停止或未扣费。
    另补 Session Shutdown → run_turn → Tool future 的集成回归。
 7. 注册表保留 call_id 并标记错误；Mock 和真实同名 web_search 不得同时注册。
-8. Debug、无效 Key 和失败消息均不含假 Key、查询标记或原始响应体。
+8. 持密类型的 Debug、无效 Key 与失败消息不含假 Key、查询标记或原始响应体。
+   普通日志保持无正文；显式 Debug wire TRACE 则验证已知 key 替换、请求/响应关联、
+   截断与后台错误预览，另以 INFO 及默认 Release 验证无 wire 事件。诊断可保留查询与
+   响应正文，不能套用普通日志的“无正文”断言，完整契约见 [诊断设计](../design/cross-cutting/diagnostics.md)。
 
 HTTP 200 内业务错误和真实可空字段应依据脱敏真实样例确认；自造 fixture 只能验证暂定
 DTO。2026-10-02 临时实施稿记录过独立临时 crate 的 19 个示例测试及其 Clippy 检查通过，

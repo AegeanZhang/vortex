@@ -1,6 +1,6 @@
 # 应用启动与依赖装配设计
 
-核对日期：2026-10-26。状态：当前 TUI 实现契约。架构归属：应用入口与装配。
+核对日期：2026-10-27。状态：当前 TUI 实现契约。架构归属：应用入口与装配。
 源码入口：[main.rs](../../../crates/vortex-cli/src/main.rs)、[bootstrap.rs](../../../crates/vortex-cli/src/bootstrap.rs)。
 
 ## 输入、产物与边界
@@ -38,8 +38,16 @@ main 持有 LoggingGuard 到结束；工厂保存配置/client/KeyReader，Sessi
 Unix 新建权限见 [日志指南](../../guide/getting-started.md#日志与本地配置)，凭据见
 [安全契约](../cross-cutting/credentials.md)。来源诊断不打印配置正文或密钥。
 
+CLI、Provider 和 Tools 调用共享 [Diagnostics](../cross-cutting/diagnostics.md)，复用已有
+subscriber/文件 writer，不再初始化日志。普通日志保持无正文；Debug wire TRACE 显式开启后
+记录三个 HTTP 路径的正文副本，不向 TUI 打印，也不新增 HOME 或配置读取。
+过滤仍由 logging.rs 决定：默认读取 RUST_LOG，当前单个 -v 强制 debug 并覆盖它。
+main 持有 guard 帮助队列收尾，但不保证等待独立错误预览任务完成；队列默认允许丢弃记录。
+
 旧 exec 在路径/日志初始化后走独立非流式 HTTP，不加载上述配置或创建 Session；
-传入 -m/-c 明确报错。后续迁移应复用 Session，不能把本节顺序写成已经接入 exec。
+传入 -m/-c 明确报错。它已接入 wire 诊断，仍未迁移到配置、工具或流式 Session。
+为记录正文改用 bytes 后 JSON 解析，坏 JSON 的底层错误源变更见诊断设计。
+后续迁移应复用 Session，不能把本节顺序写成已经接入 exec。
 
 ## 验收要求
 

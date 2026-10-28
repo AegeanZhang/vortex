@@ -134,7 +134,8 @@ cargo run -p vortex-cli --locked -- -m qwen-thinking -c 'search.enabled=false'
 
 该命令仍调用真实模型并可能计费；关闭搜索只是不调用搜索服务。可先用诗词等纯文本
 请求检查 Thinking 标签、弱化纯文本与 Markdown 正文。默认模型不会因新增 profile 改变。
-思考仅存本次 TUI 内存，不回传或恢复。当前 DeepSeek Enabled 不可用；Qwen 搜索可能
+思考的业务展示仅存本次 TUI 内存，不回传或恢复；显式开启下文 wire TRACE 时，响应中的
+思考会进入诊断文件。当前 DeepSeek Enabled 不可用；Qwen 搜索可能
 触发单次响应多工具调用限制，详见 [Thinking 设计](../design/tui/thinking-display.md#人工验收与已知限制)。
 
 ### 项目配置与加载规则
@@ -201,7 +202,7 @@ cargo run -p vortex-cli --locked -- -c 'search.max_results=3'
 4. Provider 错误显示为 `Error`，保留已经显示的片段且 TUI 不退出；下一条 Prompt 可提交。
 5. 请求期间提交 `/exit` 能结束 Session，并恢复原始终端与鼠标行为。
 6. 浏览历史时新增内容不强制跳底；回到底部后继续自动跟随。
-7. 日志与错误信息中没有 API key 或请求/响应正文。
+7. 普通日志与错误信息中没有 API key 或请求/响应正文；正文诊断单独按下节主动开启并检查。
 
 秘塔搜索的手动验收（正常路径已由作者反馈跑通，其余场景仍需验证，不是自动化测试）：
 
@@ -298,6 +299,41 @@ cargo run -p vortex-cli --locked -- -v
 不要为排障默认记录正文；前面的脱敏验收项仍需按实际日志与错误路径检查。
 `-c/--config` 已用于 TUI 的模型/搜索配置白名单，但不调整 HOME 或日志路径；HOME 使用
 VORTEX_HOME 或默认用户目录，日志级别仍通过 RUST_LOG/`-v` 控制。
+
+### 开发期请求与响应诊断
+
+默认 Debug 构建可主动开启 `vortex_wire`，查看最终请求 JSON、逐个 SSE data 与秘塔原始响应。
+在本人选择的测试工作目录运行；下列命令会调用真实模型，搜索启用时还可能调用秘塔并计费：
+
+```bash
+RUST_LOG=info,vortex_wire=trace cargo run -p vortex-cli --locked
+```
+
+不要同时加 `-v`，它会强制 debug，覆盖上述 TRACE 过滤。使用本地启动脚本时可将同样的
+RUST_LOG 导出到脚本运行环境，确认脚本不覆盖它。默认 Release 不编译这些诊断点，单改
+RUST_LOG 无法启用；不要为排障默认调整 release 的 debug-assertions。
+
+日志仍在 `<vortex-home>/logs/vortex.log`，无需单独指定诊断目录。若已安装 jq，可在另一终端查看：
+
+```bash
+# 这里的 HOME 规则与产品一致；显式 VORTEX_HOME 应为绝对路径。
+log_path="${VORTEX_HOME:-${HOME}/.vortex}/logs/vortex.log"
+tail -F "$log_path" | jq --unbuffered 'select(.target == "vortex_wire") | .fields'
+# 查看请求 DTO；body 在 JSON 日志内是一段字符串。
+jq 'select(.target == "vortex_wire" and .fields.phase == "request") | .fields.body | fromjson' "$log_path"
+```
+
+用 request_id 关联同一 HTTP 请求，seq 表示诊断事件顺序；同一 Turn 的模型/搜索请求各有
+独立 ID。SSE body 中的 `[DONE]` 不是 JSON，不要对所有 body 无条件使用 fromjson。
+日志只保存完整 Event.data，不是网络抓包，也不能据此判断服务端是否发送了 SSE id/event 字段。
+
+正文单条最多 64 KiB、每请求累计最多 4 MiB；注意 truncated、capture.limit 和序号缺口。
+错误正文最多预览 16 KiB/300 ms，独立任务不阻塞原错误；进程退出或日志队列拥塞可能丢失记录。
+这些预算不限制日志文件累计大小，当前没有轮转。
+
+已知 key 只作字面值替换，不保证转义/跨包密钥或个人信息被清除；开启后可能落盘完整
+Prompt、历史、思考和工具结果。仅使用本人可控数据，分享前检查日志，不把它当作隐私过滤器
+或会话恢复文件。字段、生命周期与离线验证契约见 [诊断设计](../design/cross-cutting/diagnostics.md)。
 
 ## 文档导航
 

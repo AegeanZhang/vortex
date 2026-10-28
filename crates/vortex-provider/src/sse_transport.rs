@@ -9,7 +9,10 @@ use vortex_core::ProviderError;
 pub(crate) type SseEventStream =
     Pin<Box<dyn Stream<Item = Result<Event, ProviderError>> + Send + 'static>>;
 
-pub(crate) fn stream(request: reqwest::RequestBuilder) -> SseEventStream {
+pub(crate) fn stream(
+    request: reqwest::RequestBuilder,
+    #[cfg(debug_assertions)] mut wire: crate::wire_trace::WireTrace,
+) -> SseEventStream {
     Box::pin(async_stream::try_stream! {
         let response = tokio::time::timeout(
             Duration::from_secs(30),
@@ -28,75 +31,82 @@ pub(crate) fn stream(request: reqwest::RequestBuilder) -> SseEventStream {
         })?;
 
         let status = response.status();
+        #[cfg(debug_assertions)]
+        wire.head(status.as_u16());
 
         if !status.is_success() {
+            #[cfg(debug_assertions)]
+            let _ = wire.capture_error_body(response);
             Err(ProviderError::HttpStatus {
                 status: status.as_u16(),
             })?;
-        }
+        } else {
+            let is_event_stream = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.split(';').next())
+                .is_some_and(|value| {
+                    value.trim().eq_ignore_ascii_case("text/event-stream")
+                });
 
-        let is_event_stream = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(';').next())
-            .is_some_and(|value| {
-                value.trim().eq_ignore_ascii_case("text/event-stream")
-            });
+            if !is_event_stream {
+                #[cfg(debug_assertions)]
+                let _ = wire.capture_error_body(response);
+                Err(ProviderError::InvalidResponse(
+                    "expected text/event-stream response".to_string(),
+                ))?;
+            } else {
+                let byte_stream = async_stream::try_stream! {
+                    let mut body = response.bytes_stream();
 
-        if !is_event_stream {
-            Err(ProviderError::InvalidResponse(
-                "expected text/event-stream response".to_string(),
-            ))?;
-        }
+                    loop {
+                        let next = tokio::time::timeout(
+                            Duration::from_secs(120),
+                            body.next(),
+                        )
+                        .await
+                        .map_err(|_| {
+                            ProviderError::Transport(
+                                "response idel timeout".to_string(),
+                            )
+                        })?;
 
-        let byte_stream = async_stream::try_stream! {
-            let mut body = response.bytes_stream();
+                        match next {
+                            Some(Ok(bytes)) => yield bytes,
 
-            loop {
-                let next = tokio::time::timeout(
-                    Duration::from_secs(120),
-                    body.next(),
-                )
-                .await
-                .map_err(|_| {
-                    ProviderError::Transport(
-                        "response idel timeout".to_string(),
-                    )
-                })?;
+                            Some(Err(_)) => {
+                                Err(ProviderError::Transport(
+                                    "response read failed".to_string(),
+                                ))?;
+                            }
 
-                match next {
-                    Some(Ok(bytes)) => yield bytes,
-
-                    Some(Err(_)) => {
-                        Err(ProviderError::Transport(
-                            "response read failed".to_string(),
-                        ))?;
+                            None => break,
+                        }
                     }
+                };
 
-                    None => break,
+                let typed_bytes =
+                    byte_stream.map(|item: Result<_, ProviderError>| item);
+
+                let mut events = Box::pin(typed_bytes.eventsource());
+
+                while let Some(event) = events.next().await {
+                    let event = event.map_err(|error| match error {
+                        EventStreamError::Transport(error) => error,
+
+                        EventStreamError::Utf8(_)
+                        | EventStreamError::Parser(_) => {
+                            ProviderError::InvalidResponse(
+                                "invalid SSE encoding or framing".to_string(),
+                            )
+                        }
+                    })?;
+                    #[cfg(debug_assertions)]
+                    wire.payload("response.sse", event.data.as_bytes(), false);
+                    yield event;
                 }
             }
-        };
-
-        let typed_bytes =
-            byte_stream.map(|item: Result<_, ProviderError>| item);
-
-        let mut events = Box::pin(typed_bytes.eventsource());
-
-        while let Some(event) = events.next().await {
-            let event = event.map_err(|error| match error {
-                EventStreamError::Transport(error) => error,
-
-                EventStreamError::Utf8(_)
-                | EventStreamError::Parser(_) => {
-                    ProviderError::InvalidResponse(
-                        "invalid SSE encoding or framing".to_string(),
-                    )
-                }
-            })?;
-
-            yield event;
         }
     })
 }

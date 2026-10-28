@@ -12,22 +12,28 @@ pub(super) struct StreamContext {
 
 pub(super) fn stream(context: StreamContext) -> ModelStream {
     Box::pin(async_stream::try_stream! {
+        #[cfg(debug_assertions)]
+        let mut wire = crate::wire_trace::WireTrace::new("model", &[&context.api_key.0]);
+        #[cfg(debug_assertions)]
+        wire.json("request", &context.request);
+
         let request = context
             .client
             .post(context.url)
             .bearer_auth(&context.api_key.0)
             .json(&context.request);
 
+        #[cfg(debug_assertions)]
+        let mut events = crate::sse_transport::stream(request, wire);
+        #[cfg(not(debug_assertions))]
         let mut events = crate::sse_transport::stream(request);
-        let mut decoder = OpenAiChatDecoder::default();
 
+        let mut decoder = OpenAiChatDecoder::default();
         while let Some(event) = events.next().await {
             let event = event?;
-
             for model_event in decoder.push_data(&event.data)? {
                 yield model_event;
             }
-
             if decoder.is_done() {
                 break;
             }

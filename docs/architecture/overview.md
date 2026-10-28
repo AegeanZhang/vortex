@@ -1,6 +1,6 @@
 # 架构总览
 
-核对日期：2026-10-26。本文描述当前源码的整体结构；后续调整见 [架构演进](evolution.md)，
+核对日期：2026-10-27。本文描述当前源码的整体结构；后续调整见 [架构演进](evolution.md)，
 实际验证结果见根 [README](../../README.md)。逻辑模块不等同于 Rust module 或 Cargo crate。
 
 ## 系统定位与边界
@@ -38,13 +38,15 @@ flowchart TB
 
 图中箭头表示运行时协作，不是 Cargo 依赖。八个逻辑模块的接口、状态归属和源码映射
 见 [逻辑模块](logical-modules.md)，关键调用顺序见 [运行链路](runtime-flows.md)。
+共享 Diagnostics 提供横切的开发期 HTTP 诊断，不参与模型/工具调度，未画入上面的业务链路。
 
 ## 依赖方向
 
 当前 manifest 中的兄弟 crate 依赖如下；完整图见 [仓库组织](repository-structure.md)：
 
-- CLI 依赖 Core、Provider、Tools 和 TUI，承担具体实现的组合装配。
-- Provider、Tools、TUI 分别依赖 Core，彼此不依赖。
+- CLI 依赖 Core、Provider、Tools、TUI 和 Diagnostics，承担具体实现的组合装配。
+- Provider、Tools、TUI 分别依赖 Core，彼此不依赖；Provider/Tools 另依赖 Diagnostics。
+- Diagnostics 不依赖任何兄弟 crate；Core/TUI 不依赖它，文件日志初始化仍在 CLI。
 - Core 不依赖任何兄弟 crate，也不依赖 Reqwest、Ratatui 或 Crossterm。
 - Sandbox 是独立 workspace 成员，目前只有模板函数和测试，没有产品依赖指向它。
 
@@ -58,6 +60,7 @@ Tokio 调度任务，并在 `config.rs` 中执行同步配置文件读取。
 | --- | --- | --- |
 | `vortex-cli` | 参数、路径、日志、启动装配、具体模型工厂与旧 exec | TUI 使用统一 Session；exec 尚未复用它 |
 | `vortex-core` | 配置、模型绑定、会话调度、Turn loop、历史语义及 Provider/Tool 接口 | 无模型 HTTP、终端控件、持久化或审批实现 |
+| `vortex-diagnostics` | 共享请求关联、正文副本脱敏/截断及错误预览 | wire_trace 仅在 debug_assertions 下编译；不初始化 subscriber、不调度业务 |
 | `vortex-provider` | OpenAI-compatible Chat Completions 请求、思考选项适配、HTTP/SSE 与解码 | 不选择任务、不决定何时执行工具 |
 | `vortex-tools` | 目录列表、工作区句柄、秘塔与 Mock 搜索 | 不调度模型；没有 MCP 或文件编辑/Shell |
 | `vortex-tui` | 输入与 slash、状态投影、Effect、控件与终端生命周期 | 不读取密钥，不持有具体 Provider，不保存权威历史 |
@@ -72,6 +75,7 @@ Provider 和历史副本。Turn 完成一个工具步骤后通知 Session 记录
 TUI 的 Transcript、当前模型标签和响应阶段均为展示状态。`CoreEvent` 是实时通知，
 不是已经具备完整重放能力的事件存储；初始 Snapshot 也不是持久化或实时共享对象。
 展示-only Thinking 进入 TUI 内存，不进入对话历史、Snapshot 或后续模型请求。
+显式 Debug wire TRACE 可将原响应中的思考另存诊断日志，不提供历史恢复。
 
 配置管理与运行时绑定分开：CLI 提供明确文件路径，Core 加载并合并 TOML，CLI 工厂
 再验证具体接入的选项并按需读取环境密钥。`/model` 改变会话绑定，不写回配置。
@@ -83,7 +87,8 @@ TUI 的 Transcript、当前模型标签和响应阶段均为展示状态。`Core
 - 错误：底层类型化错误逐层返回，Turn 失败映射为事件，TUI/CLI 负责呈现。
   完整稳定退出码仍是 [CLI 目标设计](../design/application/cli-surface.md)，不是现有统一实现。
 - 凭据与日志：密钥来自进程环境，CLI 初始化文件日志；程序不自动加载 `.env`。
-  密钥、完整请求和思考不应进入普通日志，脱敏 Debug 不替代逐个日志点审查，见 [凭据设计](../design/cross-cutting/credentials.md)。
+  密钥、完整请求和思考不应进入普通日志，脱敏 Debug 不替代逐个日志点审查。显式 Debug
+  正文诊断与有限字面值替换见 [诊断设计](../design/cross-cutting/diagnostics.md)，凭据要求见 [凭据设计](../design/cross-cutting/credentials.md)。
 - 工作区：目录工具根固定为启动 cwd，逐层拒绝链接且限制扫描/输出；这些边界不等于
   workspace trust、秘密检测、审批或 OS 沙箱。搜索与模型请求当前可访问网络。
 - 取消：Shutdown 使用独立信号打断会话等待与事件背压；已开始的 `spawn_blocking`

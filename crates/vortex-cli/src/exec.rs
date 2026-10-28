@@ -54,15 +54,31 @@ pub async fn execute(task: String) -> Result<(), Box<dyn Error + Send + Sync>> {
         stream: false,
     };
 
+    #[cfg(debug_assertions)]
+    let mut wire = crate::wire_trace::WireTrace::new("exec", &[&api_key]);
+    #[cfg(debug_assertions)]
+    wire.json("request", &request);
+
     let response = client
         .post("https://api.deepseek.com/chat/completions")
         .bearer_auth(api_key)
         .json(&request)
         .send()
-        .await?
-        .error_for_status()?;
+        .await?;
+    #[cfg(debug_assertions)]
+    wire.head(response.status().as_u16());
 
-    let response: ChatResponse = response.json().await?;
+    if let Err(error) = response.error_for_status_ref() {
+        #[cfg(debug_assertions)]
+        let _ = wire.capture_error_body(response);
+        return Err(error.into());
+    }
+
+    let body = response.bytes().await?;
+    #[cfg(debug_assertions)]
+    wire.payload("response.body", &body, false);
+
+    let response: ChatResponse = serde_json::from_slice(&body)?;
 
     if let Some(choice) = response.choices.first()
         && let Some(content) = &choice.message.content
@@ -71,4 +87,40 @@ pub async fn execute(task: String) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_fixed_response_bytes_and_optional_content() {
+        let response: ChatResponse =
+            serde_json::from_slice(br#"{"choices":[{"message":{"content":"fixture answer"}}]}"#)
+                .unwrap();
+        assert_eq!(
+            response.choices[0].message.content.as_deref(),
+            Some("fixture answer")
+        );
+        for body in [
+            br#"{"choices":[]}"#.as_slice(),
+            br#"{"choices":[{"message":{"content":null}}]}"#,
+        ] {
+            let response: ChatResponse = serde_json::from_slice(body).unwrap();
+            assert!(
+                response
+                    .choices
+                    .first()
+                    .and_then(|c| c.message.content.as_deref())
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_response_bytes_return_json_error() {
+        for body in [b"not json".as_slice(), br#"{"choices":"invalid"}"#] {
+            assert!(serde_json::from_slice::<ChatResponse>(body).is_err());
+        }
+    }
 }

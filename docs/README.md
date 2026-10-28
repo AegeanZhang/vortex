@@ -6,7 +6,7 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
 - [`architecture/README.md`](architecture/README.md) —— 架构阅读导航、文档职责与维护规则。
 - [`architecture/overview.md`](architecture/overview.md) —— 当前系统边界、整体架构与未接入能力。
-- [`architecture/logical-modules.md`](architecture/logical-modules.md) —— 八个逻辑模块的职责、接口、状态归属及源码映射。
+- [`architecture/logical-modules.md`](architecture/logical-modules.md) —— 八个业务逻辑模块及横切诊断的职责、接口、状态归属及源码映射。
 - [`architecture/runtime-flows.md`](architecture/runtime-flows.md) —— 启动、Prompt/工具循环、事件边界、模型切换和退出时序。
 - [`architecture/repository-structure.md`](architecture/repository-structure.md) —— 实际目录、crate 依赖和源码阅读入口。
 - [`architecture/technology-stack.md`](architecture/technology-stack.md) —— 当前技术选择及尚未接入的目标选型。
@@ -39,7 +39,8 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 - 工具：[注册表](design/tools/tool-registry.md)、[目录列表](design/tools/list-directory.md)、[网页搜索](design/tools/web-search.md)。
 - 交互：[TUI](design/tui/interface.md)、[Thinking 展示](design/tui/thinking-display.md)、
   [滚动](design/tui/transcript-scrolling.md)、[终端画面恢复](design/tui/terminal-redraw-recovery.md)。
-- 横切与候选：[凭据](design/cross-cutting/credentials.md)、[开发方向](design/development-directions.md)。
+- 横切与候选：[凭据](design/cross-cutting/credentials.md)、[开发期 HTTP 诊断](design/cross-cutting/diagnostics.md)、
+  [开发方向](design/development-directions.md)。
 
 **什么时候查**：编写或 Review 某个子系统时，从其主文档查契约；阅读当前链路按
 启动 → 模型管理 → Session → Agent loop → Provider/工具 → TUI。目标 API 与待验证项

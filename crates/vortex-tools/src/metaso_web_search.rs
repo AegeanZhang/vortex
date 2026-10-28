@@ -170,11 +170,22 @@ impl MetasoWebSearch {
     }
 
     async fn search(&self, query: &str) -> Result<String, ToolError> {
+        let request_body = MetasoSearchRequest::new(query, self.max_results);
+        #[cfg(debug_assertions)]
+        let mut wire = {
+            let authorization = String::from_utf8_lossy(self.authorization.as_bytes());
+            let key = authorization.strip_prefix("Bearer ").unwrap_or("");
+            let mut trace =
+                crate::wire_trace::WireTrace::new("search", &[key, authorization.as_ref()]);
+            trace.json("request", &request_body);
+            trace
+        };
+
         let response = self
             .client
             .post(&self.endpoint)
             .header(AUTHORIZATION, self.authorization.clone())
-            .json(&MetasoSearchRequest::new(query, self.max_results))
+            .json(&request_body)
             .send()
             .await
             .map_err(transport_error)?;
@@ -185,7 +196,11 @@ impl MetasoWebSearch {
             status = status.as_u16(),
             "web search response"
         );
+        #[cfg(debug_assertions)]
+        wire.head(status.as_u16());
         if !status.is_success() {
+            #[cfg(debug_assertions)]
+            let _ = wire.capture_error_body(response);
             return Err(http_error(status.as_u16()));
         }
 
@@ -200,12 +215,21 @@ impl MetasoWebSearch {
         if content_type != "application/json"
             && !(content_type.starts_with("application/") && content_type.ends_with("+json"))
         {
+            #[cfg(debug_assertions)]
+            let _ = wire.capture_error_body(response);
             return Err(ToolError::Execution(
                 "秘塔成功响应不是 JSON 类型".to_string(),
             ));
         }
 
-        let body = read_limited_body(response, self.limits.max_response_bytes).await?;
+        let body = read_limited_body(response, self.limits.max_response_bytes)
+            .await
+            .inspect_err(|_| {
+                #[cfg(debug_assertions)]
+                wire.payload("response.body_unavailable", &[], true);
+            })?;
+        #[cfg(debug_assertions)]
+        wire.payload("response.body", &body, false);
         let output = normalize_response(&body, query, self.max_results)?;
         tracing::debug!(
             backend = "metaso",
@@ -310,3 +334,6 @@ async fn read_limited_body(mut response: Response, limit: usize) -> Result<Vec<u
     }
     Ok(body)
 }
+
+#[cfg(test)]
+mod tests;

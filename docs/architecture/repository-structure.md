@@ -1,6 +1,6 @@
 # 仓库与模块组织
 
-核对日期：2026-10-26。本文描述当前目录及 Cargo 依赖；逻辑职责见
+核对日期：2026-10-27。本文描述当前目录及 Cargo 依赖；逻辑职责见
 [模块视图](logical-modules.md)，未来拆分见 [架构演进](evolution.md)。
 
 ## 当前结构
@@ -21,6 +21,7 @@ vortex/
 └── crates/
     ├── vortex-cli/             # 唯一产品二进制 vortex
     ├── vortex-core/            # 配置、模型管理、运行时与共享接口
+    ├── vortex-diagnostics/     # 共享开发期 HTTP 诊断
     ├── vortex-provider/        # 模型协议适配
     ├── vortex-tools/           # 具体工具及资源访问
     ├── vortex-tui/             # 交互与展示
@@ -38,6 +39,9 @@ flowchart LR
     CLI --> Provider[vortex-provider]
     CLI --> Tools[vortex-tools]
     CLI --> TUI[vortex-tui]
+    CLI --> Diagnostics[vortex-diagnostics]
+    Provider --> Diagnostics
+    Tools --> Diagnostics
     Provider --> Core
     Tools --> Core
     TUI --> Core
@@ -46,7 +50,8 @@ flowchart LR
 
 箭头表示 manifest 中的兄弟 crate 依赖，不表示运行时消息方向。Core 可调用 Provider/Tool
 的 trait 对象，但不反向依赖具体实现。Sandbox 没有入边或出边，尚未参与隔离。
-HTTP 依赖存在于 CLI 的工厂/旧 exec、Provider 和网络工具；终端依赖只在 TUI。
+HTTP 依赖存在于 CLI 的工厂/旧 exec、Provider、网络工具及 Diagnostics 的错误预览；终端依赖只在 TUI。
+Diagnostics 无兄弟 crate 依赖，Core/TUI 不依赖它；CLI 继续拥有文件 subscriber。
 
 ## 执行链路的源码入口
 
@@ -56,6 +61,7 @@ HTTP 依赖存在于 CLI 的工厂/旧 exec、Provider 和网络工具；终端�
 | --- | --- |
 | `vortex-cli` | `src/main.rs` 分派模式；`paths.rs` 解析目录；`logging.rs` 初始化日志；`bootstrap.rs` 加载配置、注册工具并启动 Session；`model_factory.rs` 装配模型；`exec.rs` 是未迁移的单次 HTTP |
 | `vortex-core` | `src/config.rs` 包含配置类型、合并、校验及文件加载；`model.rs` 管理绑定；`conversation.rs` 定义历史项；`provider.rs`/`tool.rs` 定义接口；`agent_loop.rs` 执行单轮；`session.rs` 包含公共连接与 actor；`lib.rs` 导出 API |
+| `vortex-diagnostics` | `src/lib.rs` 保留库入口、按 debug_assertions 导出 `wire_trace`；`src/wire_trace.rs` 实现关联、日志副本与后台错误预览 |
 | `vortex-provider` | `src/openai_chat/mod.rs` 保存已装配实例；`options.rs` 转换思考字段；`thinking_presets.rs` 解析预设/覆盖；`request.rs` 映射 DTO；`decoder.rs` 组装增量；`stream.rs` 编排；`src/sse_transport.rs` 处理 HTTP/SSE |
 | `vortex-tools` | `src/workspace_fs.rs` 管理根句柄与相对路径；`list_directory.rs` 有界枚举；`metaso_web_search.rs` 及其 `request.rs`/`response.rs` 负责搜索与映射；`mock_web_search.rs` 返回固定结果 |
 | `vortex-tui` | `src/lib.rs` 入口与事件映射；`terminal.rs` 恢复终端；`event_loop.rs` 执行 Effect；`app.rs` 持有状态与 reducer；`action.rs` 定义 Action/Effect；`command.rs` 解析 slash；`ui.rs` 布局；`markdown.rs` 转换；`widgets/` 管理输入、菜单、模型窗口和 Transcript |
@@ -66,6 +72,8 @@ HTTP 依赖存在于 CLI 的工厂/旧 exec、Provider 和网络工具；终端�
 `session → run_turn → Provider/Tool`。配套图见 [运行链路](runtime-flows.md)。
 
 测试主要位于实现文件末尾的 `#[cfg(test)] mod tests`，因此总行数不等于生产逻辑规模。
+Provider 的公开 HTTP 接入测试另在 `vortex-provider/tests/wire_trace.rs`；秘塔模块测试在
+`vortex-tools/src/metaso_web_search/tests.rs`，两处 support 仅提供测试设施。
 测试组织与 fixtures 规则见 [工程测试规范](../engineering/testing.md)。
 
 ## Workspace 约定

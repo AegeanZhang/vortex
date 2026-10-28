@@ -1,6 +1,6 @@
 # 关键技术选型
 
-核对日期：2026-10-26。本文件区分实际依赖、目标选型与尚未接入的能力。
+核对日期：2026-10-27。本文件区分实际依赖、目标选型与尚未接入的能力。
 候选比较保留在 [调研](../research/README.md)；职责与调用关系分别见
 [逻辑模块](logical-modules.md) 和 [运行链路](runtime-flows.md)。改变技术路线时更新相应 ADR。
 
@@ -19,6 +19,7 @@
 | 结构化 JSON | serde_json | Core/Tools 表达工具 Schema 与参数，Provider 映射载荷；不等于已接入 Schema 验证器 |
 | 工作区目录访问 | cap-std + cap-fs-ext | Tools 持有目录句柄，逐级不跟随符号链接；不是整个进程的 OS 沙箱 |
 | 日志 | tracing + tracing-subscriber + tracing-appender | CLI 初始化一次文件 subscriber，其余 crate 发事件；不向 TUI 屏幕输出 |
+| 开发期 HTTP 诊断 | 共享 vortex-diagnostics + cfg(debug_assertions) + vortex_wire TRACE | CLI/Provider/Tools 复用，正文副本有预算和有限字面值替换；默认 Release 无相关调用 |
 
 当前 Session 历史为内存 `Vec<ConversationItem>`，不是 JSONL 存储；ToolSpec 使用 JSON
 Schema 声明，实际参数由具体工具校验。以下目标不混入当前依赖表：
@@ -81,7 +82,7 @@ Core 使用 `futures-util` 的通用 Stream 接口，不依赖 HTTP/SSE 类型�
 ## 工具与日志依赖边界
 
 Core 定义 Tool trait 与注册表，只依赖通用 Future/JSON 类型；vortex-tools 通过 workspace
-依赖 Core、Serde、serde_json、Reqwest、Tokio 和 tracing，CLI 依赖具体实现进行注册。
+依赖 Core、Diagnostics、Serde、serde_json、Reqwest、Tokio 和 tracing，CLI 依赖具体实现进行注册。
 Tokio 的 `time` feature 用于搜索超时。目录工具另启用 `rt` 和 `sync`，分别用于
 `spawn_blocking` 与后台并发额度；不能把异步等待取消等同于终止阻塞 I/O。
 Mock 搜索不发网络请求；秘塔搜索使用 Reqwest
@@ -98,5 +99,12 @@ Tools 的 dev-dependency；目录工具不依赖 Shell 或尚未实现的 sandbo
 
 CLI 初始化非阻塞 JSON 文件日志，WorkerGuard 保持到 main 结束；日志路径为
 `<vortex-home>/logs/vortex.log`，HOME 来自统一路径解析。RUST_LOG 与 verbose 的实际优先级、
-TRACE 输入风险见 [上手指南](../guide/getting-started.md#日志与本地配置)。TOML 已接入 TUI；
+TRACE 正文诊断用法见 [上手指南](../guide/getting-started.md#开发期请求与响应诊断)。TOML 已接入 TUI；
 JSONL 会话、MCP/Bubblewrap 仍是后续目标，不能由依赖表推断能力已经可用。
+
+Diagnostics 生产依赖为 Reqwest、Serde、serde_json、Tokio（rt/time）和 tracing，
+不依赖 Core/Provider/Tools/TUI，也不使用 tracing-subscriber 初始化输出；后者只作该 crate
+的测试依赖。库自身保留，wire_trace 模块与调用点用 cfg 裁剪，不使用按 debug_assertions
+选择的 Cargo target 依赖。依赖与测试 features 以各 manifest 为准。
+普通日志无正文；显式 Debug TRACE 记录最终请求、SSE data 和搜索/旧 exec 正文。
+预算、有限脱敏、独立错误预览及 lossy 队列限制见 [诊断设计](../design/cross-cutting/diagnostics.md)。

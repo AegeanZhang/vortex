@@ -79,7 +79,9 @@ AppState 增加 UI 专属阶段：Waiting / Reasoning / Answering / Tool。Core 
 pending、草稿与 /exit 的原规则。
 
 失败仅删除 reasoning 和 content 都为空的最后占位，只有思考也须保留并追加错误。
-DisplayOnly 思考仅存当前 TUI 内存，不写模型历史、Snapshot、会话文件或普通日志。
+DisplayOnly 思考的业务展示仅存当前 TUI 内存，不写模型历史、Snapshot、会话文件或普通日志。
+显式开启 Debug wire TRACE 时，原始 SSE data 中的公开思考会另存诊断文件，见
+[诊断边界](../cross-cutting/diagnostics.md)；这不增加会话恢复或思考回传能力。
 未来重连/恢复会丢失这些展示信息是本版显式限制，不因此修改 SessionSnapshot。
 
 绘制节流不阻挡首版正确性验收；先沿用增量绘制。若真实终端出现明显卡顿，再单独实施
