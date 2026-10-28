@@ -72,6 +72,8 @@ Vortex 的文档分为架构、工程规范、详细设计、调研和用户手�
 
   **什么时候查**：阅读 `vortex-tui`、核对 Enter/Tab/Esc、模型切换确认和草稿保留，补充 reducer/widget 测试或增加交互时。
 
+- [文本选择与系统剪贴板复制](design/text-selection.md)：Prompt/Transcript 选区、异步复制和平台边界。
+
 - [`design/transcript-scrolling.md`](design/transcript-scrolling.md) —— Transcript 的滚动状态、自动跟随、按键映射、滚动条渲染和测试边界。
 
   **什么时候查**：实现长对话浏览、滚动条或 Transcript resize 行为时。

@@ -271,6 +271,22 @@ TUI 不直接显示文件树或原始工具 JSON，模型接收结果后生成�
 挂起的网络盘可能拖延退出。Linux 离线测试不代表 Windows junction 等边界已验收。
 完整契约见 [Agent loop 与内置工具](../design/agent-loop.md)。
 
+### 选择与复制文本
+
+在 Prompt 或 Transcript 内容区左键拖选后按 Ctrl+C；Prompt 也支持 Shift+方向键选择再复制。
+状态栏提示成功或失败，草稿保持不变。Esc 取消选区；菜单打开时先关闭菜单。复制不会提交、
+退出或调用模型。单次最多 1 MiB，后台写入期间仍可退出。
+
+鼠标选择复制当前可见的渲染文本，包含选中的角色/Thinking 内容，不含外框或状态栏；
+保留视觉换行和缩进，去除屏幕填充的尾部空格。滚动、Resize 或选中区域内容变化会取消旧选区。
+需要复制较长的 Prompt 时可使用键盘选区；鼠标选择不覆盖屏幕外历史。
+
+Linux 需要可用的 X11 或支持 data-control 的 Wayland 会话。SSH/tmux/无图形环境可能没有
+系统剪贴板；失败时可用终端自身的选择复制（Kitty：Shift 拖选、Ctrl+Shift+C）。程序不自动
+发送 OSC 52 或转发远程剪贴板。Linux 没有剪贴板管理器时退出后内容可能丢失。
+Windows/macOS 和原生 Wayland 尚待验收；复制支持不代表已支持 Paste/bracketed paste。
+详见 [文本选择设计](../design/text-selection.md)。
+
 ### 旧单次模式的边界
 
 现有 exec 未迁移到流式 Session/配置/工具链路，不提供该目录工具，不要求秘塔 key，

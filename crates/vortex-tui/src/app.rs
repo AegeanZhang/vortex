@@ -22,6 +22,7 @@ enum ResponsePhase {
 
 #[derive(Debug)]
 pub(crate) struct AppState {
+    pub(crate) selection: crate::selection::TextSelection,
     status: SessionStatus,
     notice: Option<String>,
     prompt_editor: PromptEditor,
@@ -37,6 +38,7 @@ pub(crate) struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            selection: Default::default(),
             status: SessionStatus::Idle,
             notice: None,
             prompt_editor: PromptEditor::default(),
@@ -54,6 +56,7 @@ impl Default for AppState {
 impl From<SessionSnapshot> for AppState {
     fn from(snapshot: SessionSnapshot) -> Self {
         Self {
+            selection: Default::default(),
             status: snapshot.status,
             notice: None,
             prompt_editor: PromptEditor::default(),
@@ -103,6 +106,9 @@ impl AppState {
             line.push_str(&format!(" | {notice}"));
         }
 
+        if self.selection.is_active() {
+            line.push_str(" | Ctrl+C 复制选区 · Esc 取消");
+        }
         line
     }
 
@@ -281,7 +287,45 @@ fn submit_prompt(state: &mut AppState) -> Vec<Effect> {
 }
 
 pub(crate) fn update(state: &mut AppState, action: UiAction) -> Vec<Effect> {
+    if matches!(
+        action,
+        UiAction::EditPrompt(_)
+            | UiAction::SubmitPrompt
+            | UiAction::ScrollTranscript(_)
+            | UiAction::RedrawRequested
+    ) {
+        state.selection.clear();
+    }
     match action {
+        UiAction::SelectText(mouse) => {
+            state.selection.mouse(mouse);
+            vec![Effect::Redraw]
+        }
+        UiAction::CopySelection => {
+            if state.model_picker.is_open() || state.command_menu.is_open() {
+                state.notice = Some("请先按 Esc 关闭菜单，再复制".into());
+                return vec![Effect::Redraw];
+            }
+            let text = state
+                .selection
+                .text()
+                .or_else(|| state.prompt_editor.copy_selection());
+            match text {
+                Some(text) => vec![Effect::CopyText(text), Effect::Redraw],
+                None => {
+                    state.notice =
+                        Some("请先拖选文本，或在 Prompt 用 Shift+方向键选择；Ctrl+C 复制".into());
+                    vec![Effect::Redraw]
+                }
+            }
+        }
+        UiAction::ClipboardResult(result) => {
+            state.notice = Some(match result {
+                Ok(()) => "已复制到系统剪贴板".into(),
+                Err(message) => message,
+            });
+            vec![Effect::Redraw]
+        }
         UiAction::Quit => {
             vec![Effect::SendCommand(AgentCommand::Shutdown), Effect::Exit]
         }
@@ -418,6 +462,49 @@ mod tests {
             update(state, UiAction::CoreEvent(event)),
             vec![Effect::Redraw]
         );
+    }
+
+    #[test]
+    fn copying_prompt_selection_preserves_draft_and_never_submits() {
+        let mut state = AppState::default();
+        state.prompt_editor.replace_text("abc中文");
+        for _ in 0..2 {
+            state
+                .prompt_editor
+                .handle_input(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT).into());
+        }
+        let effects = update(&mut state, UiAction::CopySelection);
+        assert_eq!(
+            effects,
+            vec![Effect::CopyText("中文".into()), Effect::Redraw]
+        );
+        assert_eq!(state.prompt_editor.text(), "abc中文");
+        assert_eq!(state.status, SessionStatus::Idle);
+        assert_eq!(
+            update(&mut state, UiAction::CopySelection),
+            vec![Effect::Redraw]
+        );
+    }
+
+    #[test]
+    fn copy_result_changes_notice_only_and_menu_blocks_copy() {
+        let mut state = AppState::default();
+        state.prompt_editor.replace_text("draft");
+        update(&mut state, UiAction::ClipboardResult(Ok(())));
+        assert!(state.status_line().contains("已复制到系统剪贴板"));
+        update(
+            &mut state,
+            UiAction::ClipboardResult(Err("fixture failure".into())),
+        );
+        assert!(state.status_line().contains("fixture failure"));
+        assert_eq!(state.prompt_editor.text(), "draft");
+        assert_eq!(state.status, SessionStatus::Idle);
+        state.command_menu.sync("/");
+        assert_eq!(
+            update(&mut state, UiAction::CopySelection),
+            vec![Effect::Redraw]
+        );
+        assert!(state.status_line().contains("先按 Esc"));
     }
 
     #[test]

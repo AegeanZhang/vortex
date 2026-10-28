@@ -68,6 +68,15 @@ impl PromptEditor {
         frame.render_widget(&self.textarea, area);
     }
 
+    pub(crate) fn copy_selection(&mut self) -> Option<String> {
+        let (start, end) = self.textarea.selection_range()?;
+        if start == end {
+            return None;
+        }
+        self.textarea.copy();
+        Some(self.textarea.yank_text())
+    }
+
     pub(crate) fn take_text(&mut self) -> String {
         /*
         std::mem::take(self) 会：

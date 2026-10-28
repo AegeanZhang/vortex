@@ -1,9 +1,11 @@
 mod action;
 mod app;
+mod clipboard;
 mod command;
 mod error;
 mod event_loop;
 mod markdown;
+mod selection;
 mod terminal;
 mod ui;
 mod widgets;
@@ -12,7 +14,7 @@ pub mod options;
 
 pub use error::TuiError;
 
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 
 use crate::{
     action::{ScrollCommand, UiAction},
@@ -51,6 +53,13 @@ pub(crate) fn map_event(event: Event) -> Option<UiAction> {
         {
             None
         }
+        Event::Key(key)
+            if matches!(key.code, KeyCode::Char('c' | 'C'))
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            Some(UiAction::CopySelection)
+        }
         Event::Key(key) if key.code == KeyCode::PageUp => {
             Some(UiAction::ScrollTranscript(ScrollCommand::PageUp))
         }
@@ -72,6 +81,9 @@ pub(crate) fn map_event(event: Event) -> Option<UiAction> {
         }
         Event::Key(key) => Some(UiAction::EditPrompt(key.into())),
         Event::Mouse(mouse) => match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left)
+            | MouseEventKind::Drag(MouseButton::Left)
+            | MouseEventKind::Up(MouseButton::Left) => Some(UiAction::SelectText(mouse)),
             MouseEventKind::ScrollUp => Some(UiAction::ScrollTranscript(ScrollCommand::LinesUp(
                 WHEEL_SCROLL_LINES,
             ))),
@@ -94,6 +106,59 @@ mod tests {
         let mut key = KeyEvent::new(code, modifiers);
         key.kind = kind;
         Event::Key(key)
+    }
+
+    #[test]
+    fn copy_shortcuts_and_left_button_selection_are_mapped_without_affecting_wheel() {
+        assert_eq!(
+            map_event(Event::Key(KeyEvent::new(
+                KeyCode::Char('C'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT
+            ))),
+            Some(UiAction::CopySelection)
+        );
+        for modifiers in [
+            KeyModifiers::CONTROL,
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ] {
+            assert_eq!(
+                map_event(Event::Key(KeyEvent::new(KeyCode::Char('c'), modifiers))),
+                Some(UiAction::CopySelection)
+            );
+        }
+        assert_eq!(
+            map_event(key_event(
+                KeyCode::Char('c'),
+                KeyModifiers::CONTROL,
+                KeyEventKind::Release
+            )),
+            None
+        );
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            let mouse = MouseEvent {
+                kind,
+                column: 10,
+                row: 10,
+                modifiers: KeyModifiers::NONE,
+            };
+            assert_eq!(
+                map_event(Event::Mouse(mouse)),
+                Some(UiAction::SelectText(mouse))
+            );
+        }
+        assert_eq!(
+            map_event(Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: 10,
+                row: 10,
+                modifiers: KeyModifiers::NONE
+            })),
+            None
+        );
     }
 
     #[test]

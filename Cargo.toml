@@ -14,6 +14,7 @@ vortex-provider = { path = "crates/vortex-provider" }
 vortex-tools = { path = "crates/vortex-tools" }
 vortex-tui = { path = "crates/vortex-tui" }
 
+arboard = { version = "3.7", default-features = false, features = ["wayland-data-control"] }
 async-stream = "0.3.6"
 cap-std = "4.0.3"
 cap-fs-ext = { version = "4.0.3", features = ["std"] }
