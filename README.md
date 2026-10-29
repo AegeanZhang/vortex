@@ -143,6 +143,19 @@ Provider 29、Tools 16、TUI 68、沙箱模板 1）；格式检查、严格 Clip
 格式检查、全工作区严格 Clippy、Release 构建及文档链接检查通过；本次未重复调用真实 API
 或进行终端交互验收，终端验证范围仍以上述隔离 Kitty 记录为准。
 
+输入光标修复（2026-10-29，#7）：每帧将硬件光标对齐 Prompt 的实际插入位置，空框定位在
+placeholder 前，模型窗口打开和输入区无可用单元格时隐藏。新增 6 项回归，离线测试共
+192 项通过（TUI 74 项，其余维持上述分布）；`cargo fmt --all -- --check`、全 workspace
+严格 Clippy 和 Release 构建均通过，Cargo 检查使用 `--locked --offline`。完整测试首次受
+沙箱回环端口权限限制，允许本地 mock HTTP 监听后通过，没有调用真实模型或搜索 API。
+隔离 PTY 中的生产 Release 二进制通过空框、英文首字、中文提交字符、删除、移动、横向
+滚动、resize 后编辑重绘、模型窗口焦点及正常退出恢复检查；另以生产 `TerminalGuard`
+源码构建隔离 fixture，验证错误和 panic unwind 后 termios、备用屏幕与光标恢复。
+[终端录制](docs/assets/issue-7-prompt-cursor.cast) 为 asciicast v2，截取 resize 前的输入过程，
+可用 `asciinema play` 播放；它不包含中文候选窗。真实 IME preedit/候选窗、桌面终端、
+Windows/macOS 未验收。当前事件链无法在未收到提交字符时感知组合开始，此时仍保留
+视觉 placeholder；不把硬件光标测试等同于 IME 组合事件支持，详见 [输入边界](docs/design/tui/interface.md#prompteditor-边界)。
+
 ## 首版方向
 
 - Linux 优先，提供交互式 TUI；同时规划 `vortex exec "<task>"` 单次执行模式。
