@@ -72,8 +72,7 @@ pub(crate) fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         state.command_menu().render(frame, area);
     }
 
-    // 输入框最后绘制，保证编辑器拥有最终的光标呈现。
-    state.prompt_editor().render(frame, prompt_area);
+    let prompt_cursor = state.prompt_editor().render(frame, prompt_area);
 
     if state.model_picker().is_open()
         && let Some(area) = model_picker_area(frame.area())
@@ -102,6 +101,10 @@ pub(crate) fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     // 居中模型窗口可覆盖状态栏，不能在其上重画状态文字。
     if !state.model_picker().is_open() {
         frame.render_widget(Paragraph::new(state.status_line()), status_area);
+        if let Some(cursor) = prompt_cursor {
+            // 终端/IME 使用硬件光标定位，不能依赖最后一次文本绘制的位置。
+            frame.set_cursor_position(cursor);
+        }
     }
 }
 
@@ -109,6 +112,20 @@ pub(crate) fn render(frame: &mut Frame<'_>, state: &mut AppState) {
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn empty_prompt_anchors_terminal_cursor_before_placeholder() {
+        let mut state = AppState::default();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| render(frame, &mut state)).unwrap();
+        assert_eq!(terminal.backend().cursor_position(), (1, 22).into());
+        assert!(terminal.backend().cursor_visible());
+        assert_eq!(state.prompt_editor().text(), "");
+        let row: String = (0..80)
+            .map(|x| terminal.backend().buffer()[(x, 22)].symbol())
+            .collect();
+        assert!(row.contains("Type a message ..."));
+    }
 
     fn select(state: &mut AppState, start: (u16, u16), end: (u16, u16)) {
         use crate::{action::UiAction, app::update};
@@ -133,18 +150,25 @@ mod tests {
     #[test]
     fn selection_status_refresh_does_not_overwrite_model_picker_border() {
         let mut state = AppState::default();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| render(frame, &mut state)).unwrap();
+        assert!(terminal.backend().cursor_visible());
         for ch in "/model".chars() {
             edit_key(&mut state, crossterm::event::KeyCode::Char(ch));
         }
         crate::app::update(&mut state, crate::action::UiAction::SubmitPrompt);
         assert!(state.model_picker().is_open());
-        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal.draw(|frame| render(frame, &mut state)).unwrap();
+        assert!(!terminal.backend().cursor_visible());
         let picker = model_picker_area(Rect::new(0, 0, 80, 24)).unwrap();
         assert_eq!(
             terminal.backend().buffer()[(picker.x, picker.bottom() - 1)].symbol(),
             "└"
         );
+        edit_key(&mut state, crossterm::event::KeyCode::Esc);
+        terminal.draw(|frame| render(frame, &mut state)).unwrap();
+        assert!(terminal.backend().cursor_visible());
+        assert_eq!(terminal.backend().cursor_position(), (7, 22).into());
     }
 
     #[test]

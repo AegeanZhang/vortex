@@ -72,7 +72,7 @@ pub(crate) fn enter() -> Result<(TuiTerminal, TerminalGuard)> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // 当前阶段没有文本输入，隐藏硬件光标可避免它停留在最后一次绘制位置。
+    // 首帧前先隐藏硬件光标，之后由 Frame 按当前输入焦点定位和显示。
     terminal.hide_cursor()?;
 
     Ok((terminal, guard))
