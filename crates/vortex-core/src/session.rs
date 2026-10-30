@@ -1,9 +1,11 @@
+use std::collections::VecDeque;
+
 use tokio::sync::watch;
 use tracing::info;
 
 use crate::{
-    ConversationItem, MessageRole, ModelInfo, ModelManager, SessionMessage, ToolCall, ToolRegistry,
-    ToolResult,
+    ConversationItem, MessageRole, ModelInfo, ModelManager, SessionMessage, ToolCall,
+    ToolCallLimits, ToolRegistry, ToolResult,
     agent_loop::{TurnError, TurnOutput, TurnProgress, run_turn},
 };
 
@@ -107,8 +109,94 @@ impl CoreEventStream {
     }
 }
 
+struct PendingTool {
+    call: ToolCall,
+    started: bool,
+}
+
 struct ActiveTurn {
     receiver: tokio::sync::mpsc::Receiver<TurnProgress>,
+    pending_tools: VecDeque<PendingTool>,
+}
+
+impl ActiveTurn {
+    fn begin_batch(
+        &mut self,
+        content: Option<String>,
+        calls: Vec<ToolCall>,
+        history: &mut Vec<ConversationItem>,
+    ) {
+        // 此处检查内部生产者契约，不是对模型原始数据做校验。
+        // 外部 ID/预算校验已在 run_turn 完成。
+        assert!(
+            self.pending_tools.is_empty(),
+            "previous tool batch is unfinished"
+        );
+        assert!(!calls.is_empty(), "tool batch must not be empty");
+        self.pending_tools = calls
+            .iter()
+            .cloned()
+            .map(|call| PendingTool {
+                call,
+                started: false,
+            })
+            .collect();
+        history.push(ConversationItem::AssistantToolCalls { content, calls });
+    }
+
+    fn mark_started(&mut self, call: &ToolCall) {
+        let pending = self
+            .pending_tools
+            .front_mut()
+            .expect("tool batch must exist");
+        assert_eq!(
+            pending.call.call_id, call.call_id,
+            "tool start order changed"
+        );
+        pending.started = true;
+    }
+
+    fn finish_tool(
+        &mut self,
+        call: &ToolCall,
+        result: &ToolResult,
+        history: &mut Vec<ConversationItem>,
+    ) {
+        let pending = self
+            .pending_tools
+            .pop_front()
+            .expect("tool batch must exist");
+        assert!(pending.started, "tool result arrived before tool start");
+        assert_eq!(
+            pending.call.call_id, call.call_id,
+            "tool result order changed"
+        );
+        assert_eq!(
+            call.call_id, result.call_id,
+            "tool result ID does not match"
+        );
+        history.push(ConversationItem::ToolResult(result.clone()));
+    }
+
+    fn repair_unfinished(&mut self, history: &mut Vec<ConversationItem>) -> Vec<CoreEvent> {
+        self.pending_tools
+            .drain(..)
+            .map(|pending| {
+                let output = if pending.started {
+                    "tool execution did not complete; result is unknown and effects may have occurred"
+                } else {
+                    "tool was not executed because the turn terminated"
+                };
+                let result = ToolResult {
+                    call_id: pending.call.call_id,
+                    output: output.into(),
+                    is_error: true,
+                };
+                history.push(ConversationItem::ToolResult(result.clone()));
+                CoreEvent::ToolCallFinished { name: pending.call.name, result }
+            })
+            .collect()
+    }
 }
 
 enum RuntimeInput {
@@ -141,7 +229,15 @@ async fn publish_event(
     }
 }
 
-pub fn start_session(mut models: ModelManager, tools: ToolRegistry) -> SessionConnection {
+pub fn start_session(models: ModelManager, tools: ToolRegistry) -> SessionConnection {
+    start_session_with_tool_limits(models, tools, ToolCallLimits::default())
+}
+
+pub fn start_session_with_tool_limits(
+    mut models: ModelManager,
+    tools: ToolRegistry,
+    limits: ToolCallLimits,
+) -> SessionConnection {
     info!("Session runtime starting");
 
     let (command_sender, mut command_receiver) = tokio::sync::mpsc::channel::<AgentCommand>(32);
@@ -158,7 +254,7 @@ pub fn start_session(mut models: ModelManager, tools: ToolRegistry) -> SessionCo
         let mut turns = tokio::task::JoinSet::<Result<TurnOutput, TurnError>>::new();
         let mut active: Option<ActiveTurn> = None;
 
-        loop {
+        'runtime: loop {
             // 处理进入等待之前就已经发生的关闭请求。
             if *shutdown_receiver.borrow() {
                 break;
@@ -257,6 +353,7 @@ pub fn start_session(mut models: ModelManager, tools: ToolRegistry) -> SessionCo
 
                     active = Some(ActiveTurn {
                         receiver: turn_receiver,
+                        pending_tools: VecDeque::new(),
                     });
 
                     //let provider = Arc::clone(&provider);
@@ -264,7 +361,13 @@ pub fn start_session(mut models: ModelManager, tools: ToolRegistry) -> SessionCo
                     let tools = tools.clone();
                     let turn_history = history.clone();
 
-                    turns.spawn(run_turn(provider, tools, turn_history, turn_sender));
+                    turns.spawn(run_turn(
+                        provider,
+                        tools,
+                        turn_history,
+                        turn_sender,
+                        limits.clone(),
+                    ));
                 }
 
                 RuntimeInput::Command(Some(AgentCommand::SelectModel { model_id })) => {
@@ -306,7 +409,18 @@ pub fn start_session(mut models: ModelManager, tools: ToolRegistry) -> SessionCo
                     }
                 }
 
+                RuntimeInput::Turn(Some(TurnProgress::ToolBatchStarted { content, calls })) => {
+                    active
+                        .as_mut()
+                        .expect("active turn must exist")
+                        .begin_batch(content, calls, &mut history);
+                }
+
                 RuntimeInput::Turn(Some(TurnProgress::ToolStarted { call })) => {
+                    active
+                        .as_mut()
+                        .expect("active turn must exist")
+                        .mark_started(&call);
                     if !publish_event(
                         &event_sender,
                         &mut shutdown_receiver,
@@ -318,26 +432,18 @@ pub fn start_session(mut models: ModelManager, tools: ToolRegistry) -> SessionCo
                     }
                 }
 
-                RuntimeInput::Turn(Some(TurnProgress::ToolFinished {
-                    assistant_prefix,
-                    call,
-                    result,
-                })) => {
-                    if let Some(content) = assistant_prefix {
-                        history.push(ConversationItem::Message(SessionMessage {
-                            role: MessageRole::Assistant,
-                            content,
-                        }));
-                    }
-
-                    let name = call.name.clone();
-                    history.push(ConversationItem::ToolCall(call));
-                    history.push(ConversationItem::ToolResult(result.clone()));
-
+                RuntimeInput::Turn(Some(TurnProgress::ToolFinished { call, result })) => {
+                    active
+                        .as_mut()
+                        .expect("active turn must exist")
+                        .finish_tool(&call, &result, &mut history);
                     if !publish_event(
                         &event_sender,
                         &mut shutdown_receiver,
-                        CoreEvent::ToolCallFinished { name, result },
+                        CoreEvent::ToolCallFinished {
+                            name: call.name,
+                            result,
+                        },
                     )
                     .await
                     {
@@ -370,39 +476,40 @@ pub fn start_session(mut models: ModelManager, tools: ToolRegistry) -> SessionCo
                 }
 
                 RuntimeInput::Turn(None) => {
-                    // 通道已关闭且排队事件已消费完。
-                    // take 会把 active 便会 None, 并交出本轮状态。
-                    active
+                    let mut closed_turn = active
                         .take()
-                        .expect("closed model channel requires an active turn");
-
-                    // 按上述任务结构，此时 sender 已释放，
-                    // 任务不再等待网络后继续生产事件
+                        .expect("closed channel requires an active turn");
                     if *shutdown_receiver.borrow() {
                         break;
                     }
 
                     let joined = tokio::select! {
                         biased;
-
-                        _ = shutdown_receiver.changed() => {
-                            break;
-                        }
-
-                        _ = event_sender.closed() => {
-                            break;
-                        }
-
-                        joined = turns.join_next() => {
-                            joined
-                        }
+                        _ = shutdown_receiver.changed() => { break; }
+                        _ = event_sender.closed() => { break; }
+                        joined = turns.join_next() => joined,
                     };
 
+                    // 必须在处理任务成功/失败之前补齐历史；所有排队的真实结果此时已消费。
+                    let repairs = closed_turn.repair_unfinished(&mut history);
+                    let had_unfinished = !repairs.is_empty();
+                    for repair in repairs {
+                        if !publish_event(&event_sender, &mut shutdown_receiver, repair).await {
+                            break 'runtime;
+                        }
+                    }
+
                     let event = match joined {
-                        Some(Ok(Ok(output))) => {
+                        Some(Ok(Ok(output))) if !had_unfinished => {
                             history.push(ConversationItem::Message(output.assistant));
                             status = SessionStatus::Idle;
                             CoreEvent::TurnCompleted
+                        }
+                        Some(Ok(Ok(_))) => {
+                            status = SessionStatus::Failed;
+                            CoreEvent::TurnFailed {
+                                message: "turn ended with unfinished tool calls".into(),
+                            }
                         }
                         Some(Ok(Err(error))) => {
                             status = SessionStatus::Failed;
@@ -419,11 +526,10 @@ pub fn start_session(mut models: ModelManager, tools: ToolRegistry) -> SessionCo
                         None => {
                             status = SessionStatus::Failed;
                             CoreEvent::TurnFailed {
-                                message: "turn task is missing".to_string(),
+                                message: "turn task is missing".into(),
                             }
                         }
                     };
-
                     if !publish_event(&event_sender, &mut shutdown_receiver, event).await {
                         break;
                     }
@@ -770,7 +876,10 @@ mod tests {
             requests[2].items,
             vec![
                 message(MessageRole::User, "U1"),
-                ConversationItem::ToolCall(call),
+                ConversationItem::AssistantToolCalls {
+                    content: None,
+                    calls: vec![call]
+                },
                 ConversationItem::ToolResult(result),
                 message(MessageRole::User, "U2")
             ]
@@ -1204,5 +1313,221 @@ mod tests {
             receiver.try_recv(),
             Err(mpsc::error::TryRecvError::Empty),
         ));
+    }
+
+    struct PanicOnSecondTool(std::sync::atomic::AtomicUsize);
+    impl crate::Tool for PanicOnSecondTool {
+        fn spec(&self) -> crate::ToolSpec {
+            crate::ToolSpec {
+                name: "batch_fixture".into(),
+                description: "fixture".into(),
+                input_schema: serde_json::json!({"type":"object"}),
+            }
+        }
+        fn execute(&self, _: serde_json::Value) -> crate::ToolFuture<'_> {
+            Box::pin(async move {
+                let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                assert_ne!(n, 1, "fixture task panic");
+                Ok("completed".into())
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn partial_batch_panic_repairs_history_before_next_prompt() {
+        let calls: Vec<_> = ["a", "b", "c"]
+            .into_iter()
+            .map(|id| crate::ToolCall {
+                call_id: id.into(),
+                name: "batch_fixture".into(),
+                arguments: serde_json::json!({}),
+            })
+            .collect();
+        let mut first = vec![text("prefix")];
+        first.extend(
+            calls
+                .iter()
+                .cloned()
+                .map(|call| Ok(ModelEvent::ToolCall { call })),
+        );
+        first.push(Ok(ModelEvent::Finished {
+            reason: FinishReason::ToolCalls,
+        }));
+        let provider = Arc::new(FakeProvider::new(vec![
+            scripted(first),
+            scripted(vec![text("answer"), stop()]),
+        ]));
+        let tool = Arc::new(PanicOnSecondTool(std::sync::atomic::AtomicUsize::new(0)));
+        let SessionConnection {
+            agent, mut events, ..
+        } = start_session(
+            test_models(provider.clone()),
+            ToolRegistry::new(vec![tool.clone()]).unwrap(),
+        );
+        begin_turn(&agent, &mut events, "first").await;
+        let mut completed = Vec::new();
+        loop {
+            match within(events.recv())
+                .await
+                .expect("session unexpectedly closed")
+            {
+                CoreEvent::ToolCallFinished { result, .. } => completed.push(result),
+                CoreEvent::TurnFailed { .. } => break,
+                CoreEvent::TurnCompleted => panic!("panic must not become success"),
+                _ => {}
+            }
+        }
+        assert_eq!(tool.0.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(completed.len(), 3);
+        assert_eq!(completed[0].call_id, "a");
+        assert!(!completed[0].is_error);
+        assert_eq!(completed[1].call_id, "b");
+        assert!(completed[1].is_error && completed[1].output.contains("unknown"));
+        assert_eq!(completed[2].call_id, "c");
+        assert!(completed[2].is_error && completed[2].output.contains("not executed"));
+
+        begin_turn(&agent, &mut events, "second").await;
+        expect_event(
+            &mut events,
+            CoreEvent::AssistantTextDelta {
+                delta: "answer".into(),
+            },
+        )
+        .await;
+        expect_event(&mut events, CoreEvent::TurnCompleted).await;
+        let requests = provider.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1].items.len(), 6);
+        assert_eq!(
+            requests[1].items[1],
+            ConversationItem::AssistantToolCalls {
+                content: Some("prefix".into()),
+                calls,
+            }
+        );
+        for (item, expected) in requests[1].items[2..5].iter().zip(completed) {
+            assert_eq!(item, &ConversationItem::ToolResult(expected));
+        }
+        close_session(&agent, &mut events).await;
+    }
+    struct BudgetFixtureTool;
+    impl crate::Tool for BudgetFixtureTool {
+        fn spec(&self) -> crate::ToolSpec {
+            crate::ToolSpec {
+                name: "web_search".into(),
+                description: "fixture".into(),
+                input_schema: serde_json::json!({"type":"object"}),
+            }
+        }
+        fn execute(&self, _: serde_json::Value) -> crate::ToolFuture<'_> {
+            Box::pin(async { Ok("fixture result".into()) })
+        }
+    }
+
+    #[tokio::test]
+    async fn each_user_turn_receives_a_fresh_tool_budget() {
+        let tool_step = |id: &str| {
+            scripted(vec![
+                Ok(ModelEvent::ToolCall {
+                    call: crate::ToolCall {
+                        call_id: id.into(),
+                        name: "web_search".into(),
+                        arguments: serde_json::json!({}),
+                    },
+                }),
+                Ok(ModelEvent::Finished {
+                    reason: FinishReason::ToolCalls,
+                }),
+            ])
+        };
+        let provider = Arc::new(FakeProvider::new(vec![
+            tool_step("a"),
+            scripted(vec![text("A"), stop()]),
+            tool_step("b"),
+            scripted(vec![text("B"), stop()]),
+        ]));
+        let limits = crate::ToolCallLimits::new(std::collections::BTreeMap::from([(
+            "web_search".into(),
+            1,
+        )]))
+        .unwrap();
+        let SessionConnection {
+            agent, mut events, ..
+        } = super::start_session_with_tool_limits(
+            test_models(provider),
+            ToolRegistry::new(vec![Arc::new(BudgetFixtureTool)]).unwrap(),
+            limits,
+        );
+        for prompt in ["first", "second"] {
+            begin_turn(&agent, &mut events, prompt).await;
+            let mut tool_results = 0;
+            loop {
+                match within(events.recv())
+                    .await
+                    .expect("session unexpectedly closed")
+                {
+                    CoreEvent::ToolCallFinished { .. } => tool_results += 1,
+                    CoreEvent::TurnCompleted => break,
+                    CoreEvent::TurnFailed { message } => panic!("unexpected failure: {message}"),
+                    _ => {}
+                }
+            }
+            assert_eq!(tool_results, 1);
+        }
+        close_session(&agent, &mut events).await;
+    }
+    #[tokio::test]
+    async fn an_over_budget_batch_is_not_added_to_session_history() {
+        let calls = ["a", "b"].into_iter().map(|id| {
+            Ok(ModelEvent::ToolCall {
+                call: crate::ToolCall {
+                    call_id: id.into(),
+                    name: "web_search".into(),
+                    arguments: serde_json::json!({}),
+                },
+            })
+        });
+        let mut first: Vec<_> = calls.collect();
+        first.push(Ok(ModelEvent::Finished {
+            reason: FinishReason::ToolCalls,
+        }));
+        let provider = Arc::new(FakeProvider::new(vec![
+            scripted(first),
+            scripted(vec![text("answer"), stop()]),
+        ]));
+        let limits = crate::ToolCallLimits::new(std::collections::BTreeMap::from([(
+            "web_search".into(),
+            1,
+        )]))
+        .unwrap();
+        let SessionConnection {
+            agent, mut events, ..
+        } = super::start_session_with_tool_limits(
+            test_models(provider.clone()),
+            ToolRegistry::new(vec![Arc::new(BudgetFixtureTool)]).unwrap(),
+            limits,
+        );
+        begin_turn(&agent, &mut events, "first").await;
+        assert!(matches!(
+            within(events.recv()).await,
+            Some(CoreEvent::TurnFailed { .. })
+        ));
+        begin_turn(&agent, &mut events, "second").await;
+        expect_event(
+            &mut events,
+            CoreEvent::AssistantTextDelta {
+                delta: "answer".into(),
+            },
+        )
+        .await;
+        expect_event(&mut events, CoreEvent::TurnCompleted).await;
+        assert_eq!(
+            provider.requests()[1].items,
+            vec![
+                message(MessageRole::User, "first"),
+                message(MessageRole::User, "second"),
+            ]
+        );
+        close_session(&agent, &mut events).await;
     }
 }

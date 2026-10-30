@@ -1,6 +1,6 @@
 # 模型流接口与 SSE 协议适配设计
 
-核对日期：2026-10-26。状态：当前实现契约。架构归属：模型协议适配。
+核对日期：2026-10-30。状态：当前实现契约。架构归属：模型协议适配。
 源码入口：[provider.rs](../../../crates/vortex-core/src/provider.rs)、[openai_chat](../../../crates/vortex-provider/src/openai_chat)、[sse_transport.rs](../../../crates/vortex-provider/src/sse_transport.rs)。实际检查结果见根 [README](../../../README.md)，验收要求不代表已经通过。
 
 本文件维护模型流契约、wire 映射与 HTTP/SSE/Decoder 行为，不维护 Session 调度或 TUI 布局。
@@ -55,7 +55,7 @@ pub enum FinishReason {
 
 `stream()` 本身不等待网络；返回流拥有 HTTP client、请求和必要配置，第一次 poll 才发起
 请求。`'static` 表示不借用短生命周期的 `&self`，不是让数据泄漏或永久存活。错误使用
-`Result::Err`，与正常结束原因区分。未知结束原因、不支持的多调用或 legacy function_call
+`Result::Err`，与正常结束原因区分。未知结束原因、多候选或 legacy function_call
 返回协议错误，不猜测成功。
 
 ## Provider 的 SSE 解析
@@ -69,21 +69,24 @@ pub enum FinishReason {
 - HTTP 非成功状态先返回错误；成功状态核对 `Content-Type: text/event-stream`（允许参数）。
 - SSE 注释/心跳与空 data 不产生文本；`choices: []` 的统计包不结束模型步骤。
 - choice 0 的 `delta.content` 和 `delta.reasoning_content` 分别产生事件；同一个包有两者
-  时分别处理，不能使用互斥 else if。工具参数增量独立累积；首版拒绝非零 choice、
-  多候选、非零 tool index 和 legacy function_call。
+  时分别处理，不能使用互斥 else if。多个工具的参数增量独立累积；仍拒绝非零 choice、
+  多候选和 legacy function_call，非零工具 index 则属于同一响应的其他调用。
 - 先处理包内 Delta，再记录 `finish_reason`。没有内容的终止包不报“空回复”。
 - 严格完成策略：收到合法 `finish_reason` 后继续消费统计包，直到 `[DONE]` 才输出一次
-  Finished；ToolCalls 结束时先输出完整 ToolCall，再输出 Finished，随后流结束。
+  Finished；ToolCalls 结束时整批校验，成功后按工具 index 升序输出全部完整 ToolCall，
+  最后输出 Finished，随后流结束。任一调用不合法则整批不发布 ToolCall。
   `[DONE]` 没有结束原因、EOF 缺少 `[DONE]`、结束原因重复或
   终止后继续输出正文均视为协议异常。其他供应商需要不同结束规则时在其 adapter 内明确支持。
 - 错误 JSON、API 错误对象、HTTP/body 读取错误均输出一次 Err 后结束，错误文案不含原始
   响应体、认证头或完整请求。禁止把失败事件序列转换为空字符串成功结果。
 
-工具增量由 `openai_chat/decoder.rs` 的 PendingToolCall 保存 id、name 和 arguments。
-name/arguments 片段按到达顺序拼接，arguments 在 DONE 时解析为 JSON；缺失 ID/名称、
-非法 JSON 或工具信息与结束原因不匹配都失败。后续 `id: ""` 不表示 ID 改变，应忽略；
+工具增量由 `openai_chat/decoder.rs` 的 `BTreeMap<u32, PendingToolCall>` 按 index 保存
+各自 id、name 和 arguments，支持交错到达。每个调用的 name/arguments 按到达顺序拼接；
+首块 arguments 为空合法，须等后续片段与 DONE。DONE 时逐项解析完整 JSON，缺失 ID/名称、
+非法 JSON 或工具信息与结束原因不匹配都失败，不提前发布已校验的部分调用。
+后续 `id: ""` 不表示 ID 改变，应忽略；
 首次非空 ID 保存，相同非空 ID 接受，不同非空 ID 仍报错。跨模型步骤的重复 ID 则由
-Core 校验，不能在 Decoder 内用上一条模型流的状态判断。
+Core 整批校验，批内不同 index 使用相同 ID 也由 Core 拒绝；Decoder 不持有跨请求的 ID 集合。
 
 模块边界：`sse_transport.rs` 处理 HTTP/超时/字节分帧，`openai_chat/stream.rs` 连接传输
 与解码，`request.rs` 映射请求，`decoder.rs` 负责协议状态；不是把全部逻辑放在 lib.rs。
@@ -120,13 +123,15 @@ SecretString 如需 Clone 仍保留手写脱敏 Debug，不为打印日志开放
 
 ## 请求消息与工具映射
 
-Chat Completions 将 ToolSpec 映射为 `tools[].function`；ToolCall 映射为 Assistant 的
-`tool_calls`；结果映射为 `role: "tool"`、`tool_call_id` 和文本 `content`。相邻的 Assistant
-前缀与 ToolCall 合并进同一条 wire message；结构化 arguments 仅在协议边界序列化为 JSON
-字符串。`is_error` 保留于内部类型和 UI 事件，wire 层通过结果正文表达错误。
+Chat Completions 将 ToolSpec 映射为 `tools[].function`。每个
+`AssistantToolCalls { content, calls }` 映射为一条 Assistant 消息：前缀只写一次，无前缀时
+content 为 null，tool_calls 数组保留全部调用及原顺序。结构化 arguments 仅在协议边界
+序列化为 JSON 字符串；不再通过相邻 Message/ToolCall 猜测批次。
+每个结果映射为独立的 `role: "tool"`、匹配的 `tool_call_id` 和文本 content；真实结果和
+异常补齐结果使用相同映射。`is_error` 保留于内部类型和 UI 事件，wire 通过结果正文表达错误。
 
-Provider 按 index 累积工具参数，到 `[DONE]` 才输出完整 ToolCall 和 Finished；当前只接受
-index 0。流中的空 ID 不覆盖已保存的 ID，不同非空 ID 仍报错，详见上文的 Decoder 规则。
+请求不设置 parallel_tool_calls=false；Decoder 接受多个调用不代表本地并行执行，调度
+与预算归 Core。展示-only reasoning 仍不写入这些历史消息。
 
 ## 消费方与终态边界
 
@@ -166,7 +171,9 @@ Debug。显式 Debug wire TRACE 是 [诊断设计](../cross-cutting/diagnostics.
 | --- | --- | --- |
 | `vortex-provider/src/openai_chat/request.rs` | 请求映射 | role/content、工具定义与结果正确，stream 为 true，千问开关按显式选项写入 |
 | `src/openai_chat/decoder.rs`、`src/sse_transport.rs` | HTTP/SSE 异常与结束 | 状态码、Content-Type、坏 JSON、缺 DONE、超时映射正确；统计包不结束模型步骤 |
-| 同上 | 字节分帧与工具增量 | 中文跨 chunk、多行 data 不丢内容；参数拼接、空 ID 和非空 ID 变化正确处理 |
+| `src/openai_chat/decoder.rs` | 多调用交错与整批失败 | 首块空参数合法、按 index 独立累积并排序输出；第二项非法时第一项也不发布 |
+| `src/openai_chat/request.rs` | 批次映射 | 一条 Assistant 含完整数组、前缀一次，全部结果 ID/正文匹配；不回填 reasoning |
+| `src/openai_chat/decoder.rs`、`src/sse_transport.rs` | 字节分帧与工具增量 | 中文跨 chunk、多行 data 不丢内容；参数拼接、空 ID 和非空 ID 变化正确处理 |
 | `src/openai_chat/mod.rs` | 密钥脱敏 | SecretString 的 Debug 不包含原始密钥 |
 
 ## 参考与核对日期

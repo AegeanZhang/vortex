@@ -92,7 +92,8 @@ rg -n 'vortex_sandbox|vortex-sandbox|\badd\(' crates Cargo.toml
   `#[cfg(test)]` 隐藏跨 crate 消费的类型。
 - **Quit/slash 扩展、TuiOptions.color、CLI config 参数** 属于交互或公开接口变更，
   不因暂未生效就删除；日志签名与全链路隐私审计另做，已移除的提交正文 TRACE 不恢复。
-- **四次工具上限、SSE 严格完成、阶段 A 拒绝 Thinking** 是真实契约，不为案例成功放宽。
+- **按工具调用额度、SSE 严格完成、Reject 策略拒绝 Thinking** 是当前契约，不为案例成功放宽。
+  旧单调用/统一四次限制已由专项演进取代；清理不应恢复旧限制或取消新预算校验。
   鼠标/滚动条与终端恢复问题亦不混入清理。
 - **依赖 features** 先核对实际使用和单独 crate 构建，不能因 Workspace feature 合并
   后可编译就判断某个成员的配置多余。

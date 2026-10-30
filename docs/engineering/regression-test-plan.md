@@ -5,6 +5,7 @@
 - Slash 与配置实施稿补充回收：2026-10-19；保留未完成的测试与人工验收，不重复搬运已实现代码。
 - 目录工具契约同步：2026-10-21；区分目录工具/装配已有用例与仍待补的全链路场景，结果见根 README。
 - 思考选项、目录与 Thinking 实施稿回收：2026-10-26；补齐人工验收顺序和失败分类，不新增通过声明。
+- 多工具与额度契约同步：2026-10-30；迁移旧单调用断言，增加批次、按工具额度及异常补齐矩阵。
 - 定位：从本地实施稿回收的测试方法与待补场景，不是测试通过记录。
 - 契约依据：[Session](../design/runtime/session-runtime.md)、[Agent loop](../design/runtime/agent-loop.md)、
   [SSE](../design/provider/streaming-response.md)。实际覆盖与运行结果见根 [README](../../README.md)。
@@ -38,6 +39,7 @@ let requests = fake_provider.requests();
 不是生产 ModelProvider 方法。
 工具场景传入真实 ToolRegistry 和 FakeTool；不要通过真实模型保证某次一定调用工具。
 MockWebSearch 只替代搜索服务，仍搭配真实模型时不属于完全离线测试。
+使用自定义额度时调用 start_session_with_tool_limits，规则从测试显式注入，不依赖真实用户配置。
 
 ## 2. 异步时序、退出与背压
 
@@ -54,6 +56,8 @@ MockWebSearch 只替代搜索服务，仍搭配真实模型时不属于完全离
 
 使用 oneshot/Notify 建立事件先后关系，`yield_now()` 只让出调度机会；timeout 作为防挂死
 上限，不作为完成同步。Shutdown 通知发送成功不代表任务已经结束，须观察释放结果。
+Agent loop helper 用独立 collector 与 run_turn 并行消费 TurnProgress，任务返回后再等待
+collector 结束。50 次调用可产生超过 128 条进度，先等待 run_turn 再收事件会阻塞。
 
 ## 3. Core 与工具循环场景
 
@@ -63,17 +67,23 @@ MockWebSearch 只替代搜索服务，仍搭配真实模型时不属于完全离
 | 部分输出后失败 | UI 可保留片段；下一次请求不含失败 Assistant，已接受 User 保留 |
 | 空输入或 Running 时重复提交 | CommandRejected；不启动第二条流、不改当前 Assistant |
 | 缺 Finished、空 Stop、Length、ContentFilter、panic | 一个失败终态，不生成伪成功历史 |
-| 调用 → 结果 → 最终回答 | 第二次请求包含 ToolCall/ToolResult，ID、参数和顺序一致 |
-| 工具前有 Assistant 前缀 | 前缀与调用/结果一起保存，wire 请求合并为同一 Assistant 消息 |
+| 单调用或多调用 → 结果 → 最终回答 | 第二次请求一条 AssistantToolCalls 加全部结果，ID、参数和顺序一致 |
+| 工具前有 Assistant 前缀 | 前缀只存于批次一次，wire 为一条 Assistant 消息及完整 tool_calls 数组 |
+| 同一步多个调用 | RecordingTool 记录 start/end，严格交替，不能仅凭最终结果判断顺序执行 |
 | 未知工具、参数错误、执行错误 | is_error=true、原 call_id 保留，模型仍能继续处理结果 |
-| 四次调用后最终回答 | 可成功；第五次调用在执行、ToolStarted 和历史写入前拒绝 |
-| 空白、历史重复、跨步骤重复 ID | 不执行工具，不产生重复 ID 的结果；工具失败也不释放 ID |
+| 显式四次额度后最终回答 | 仍可成功；第五次同名调用在执行、ToolStarted 和批次历史写入前拒绝 |
+| 默认额度及重置 | 未配置工具第 50 次允许、第 51 次拒绝；跨模型步骤累计，新用户 Turn 重置 |
+| 按名称规则 | 搜索默认 4，未配置工具默认 50，显式可超过 50；不同工具不共享计数 |
+| 整批预检 | 聚合同名次数，任一超限则全批不执行、不写声明；预检不扣额 |
+| 失败与未知工具计数 | 已注册工具错误不退额；未知工具不扣实际执行额度 |
+| 空白、批内/历史/跨步骤重复 ID | 不执行该批工具，不产生重复 ID 结果；工具失败也不释放 ID |
 | 后续模型步骤失败 | 已完成工具步骤仍在历史，失败步骤的部分正文不在历史 |
-| 不合法事件组合 | Stop 带调用、ToolCalls 不带调用、多调用、终态后继续发事件均失败 |
+| 批次任务中途 panic | 第一项成功、第二项未知、第三项未执行；发布补齐结果后失败，下一轮历史完整 |
+| 不合法事件组合 | Stop 带调用、ToolCalls 不带调用均失败；终态后数据由 Provider 严格校验 |
 | 空闲切换后第二轮 | 新 Provider 收到保留且不重复的历史，旧 Provider 不收到第二轮，不产生 slash User 消息 |
 | Running/构造失败/同 ID 选择 | 专用拒绝/确认事件，失败保留绑定；同 ID 不重建但仍确认 |
 
-ToolRegistry 单独验证稳定的 specs 注册顺序、重名拒绝和 empty 注册表行为。
+ToolRegistry 单独验证稳定的 specs 注册顺序、contains 查询、重名拒绝和 empty 注册表行为。
 工具闭环测试还应核对 ToolStarted/ToolFinished 与文本事件的顺序，不只检查返回文本。
 
 配置/装配专项另用 TempDir 和注入 KeyReader：合并优先级、cwd-only、路径/来源状态、
@@ -83,12 +93,13 @@ ToolRegistry 单独验证稳定的 specs 注册顺序、重名拒绝和 empty �
 
 ## 4. Provider：请求映射、Decoder 与真实分帧
 
-请求测试验证 `items/tools` 映射、工具结果 ID、参数 JSON 字符串、Assistant 前缀合并，
+请求测试验证 `items/tools` 映射、全部工具结果 ID、参数 JSON 字符串、一条批次前缀和完整数组，
 以及无工具时的序列化形状。Decoder 测试喂完整 SSE data；分帧测试从 HTTP bytes 开始，
 两者不可相互替代。
 
 - 内容增量、统计空 choices、注释/心跳、同包正文与思考；Reject 策略拒绝思考，DisplayOnly 独立转发。
 - 工具名称/参数跨包拼接，首次非空 ID、后续空 ID、相同 ID、不同非空 ID、坏参数 JSON。
+- 两个 index 交错、第二个首块参数为空，DONE 时按 index 输出；后项非法不得先发布前项调用。
 - `finish_reason` 与 `[DONE]` 的顺序、缺 DONE、缺结束原因、重复终态、终态后正文。
 - 非成功 HTTP、错误 Content-Type、坏 JSON/API 错误、body 中断与空闲超时。
 - 同一 fixture 分别整包、逐字节、按多个固定大小拆分；包含中文跨字节边界、CRLF、
@@ -407,7 +418,7 @@ Mock 仅替代搜索服务，模型仍可能计费。Disabled 若返回思考，
    再确认目录工具与搜索工具可分别调用，不能以搜索成功替代目录工具验收。
 
 目录名和文件名会随结果发给模型，属于不可信数据；隐藏规则不等于秘密检测或提示注入
-防护。保持单层和四次工具预算，硬 I/O 超时、递归、分页及完整沙箱仍是后续议题。
+防护。保持单层及每工具调用额度（目录默认每 Turn 50 次），硬 I/O 超时、递归、分页及完整沙箱仍是后续议题。
 
 ### Thinking 展示与工具往返
 
@@ -427,15 +438,25 @@ Mock 仅替代搜索服务，模型仍可能计费。Disabled 若返回思考，
 6. 切回默认关闭 profile，确认正常回答且无意外 Thinking；关闭模式意外返回思考仍拒绝。
 
 记录失败时区分模型没有选择工具、HTTP 参数拒绝、工具历史不兼容、无正文结束、Core
-协议拒绝与 TUI 展示异常。目前单个模型步骤只接受一个工具调用，多调用限制见
-[Issue #3](https://github.com/AegeanZhang/vortex/issues/3)；它与整个 Turn 四次工具预算不同，
-遇到后记录受阻场景，不把它当成本次归档需要修复的功能。
+协议拒绝与 TUI 展示异常。此前 [Issue #3](https://github.com/AegeanZhang/vortex/issues/3)
+记录的单调用限制已在本地改为多调用顺序执行，真实服务复测尚不能由离线测试替代。
+新增验证“搜索一下西雅图的天气”，若模型本次只发一个调用，不能据此声称真实多调用往返通过。
 若远端要求回传 reasoning，停止该接入的展示-only 验收，另行设计历史支持，不吞字段、
 拼入正文、静默关闭工具或放宽协议校验。
 
 每次补测试后先运行对应 crate 的 `cargo test -p <package> --locked`，再按测试规范
 执行 fmt check、完整严格 Clippy、workspace tests 与 release build。只把实际执行的
 结果写入根 README，不沿用原实施稿的副本测试计数或中间编译失败作为当前状态。
+
+### 工具额度的人工验收
+
+1. 不改配置先验证普通搜索与 Thinking profile；内置搜索额度为 4，不要求新增 TOML。
+2. 如需降低额度，在用户 config.toml 写 `[tools.call_limits]`、`web_search = 1` 后重启；
+   不放入 project.toml 或 `-c`。同批两个搜索应全部拒绝；分两步请求则只执行第一次。
+3. 核对超限工具名、limit/used/requested，确认被拒绝批次未发搜索 HTTP 请求；不只看最终回答。
+4. 同一 Session 再提交有效 Prompt，验证新 Turn 获得新额度；此前已完成调用/结果仍配对。
+5. 测试后删除临时覆盖并重启恢复默认。Mock 可避免搜索费用，但模型仍可能计费；
+   顺序、额度边界与历史完整性优先由固定脚本测试，真实模型不保证按提示生成指定次数。
 
 ## 回收来源
 

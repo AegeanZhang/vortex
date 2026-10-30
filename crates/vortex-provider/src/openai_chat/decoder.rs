@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 use vortex_core::{FinishReason, ModelEvent, ProviderError, ToolCall};
 
@@ -52,7 +53,8 @@ struct PendingToolCall {
 #[derive(Default)]
 pub(crate) struct OpenAiChatDecoder {
     finish_reason: Option<FinishReason>,
-    pending_tool_call: Option<PendingToolCall>,
+    //pending_tool_call: Option<PendingToolCall>,
+    pending_tool_calls: BTreeMap<u32, PendingToolCall>,
     done: bool,
 }
 
@@ -71,46 +73,50 @@ impl OpenAiChatDecoder {
         // SSE 的结束标记不是 JSON，必须先单独处理。
         if data.trim() == "[DONE]" {
             let reason = self.finish_reason.take().ok_or_else(|| {
-                ProviderError::InvalidResponse("[DONE] received without finish_reason".to_string())
+                ProviderError::InvalidResponse("[DONE] received without finish_reason".into())
             })?;
 
             let mut events = Vec::new();
 
             match reason {
                 FinishReason::ToolCalls => {
-                    let pending = self.pending_tool_call.take().ok_or_else(|| {
-                        ProviderError::InvalidResponse(
-                            "tool_calls finish reason without a tool call".to_string(),
-                        )
-                    })?;
-
-                    let call_id = pending.id.ok_or_else(|| {
-                        ProviderError::InvalidResponse("tool call is missing id".to_string())
-                    })?;
-
-                    if pending.name.is_empty() {
+                    if self.pending_tool_calls.is_empty() {
                         return Err(ProviderError::InvalidResponse(
-                            "tool call is missing function name".to_string(),
+                            "tool_calls finish reason without a tool call".into(),
                         ));
                     }
 
-                    let arguments = serde_json::from_str(&pending.arguments).map_err(|_| {
-                        ProviderError::InvalidResponse(
-                            "tool call arguments are not valid Json".to_string(),
-                        )
-                    })?;
-
-                    events.push(ModelEvent::ToolCall {
-                        call: ToolCall {
+                    let mut calls = Vec::new();
+                    for pending in std::mem::take(&mut self.pending_tool_calls).into_values() {
+                        let call_id =
+                            pending
+                                .id
+                                .filter(|id| !id.trim().is_empty())
+                                .ok_or_else(|| {
+                                    ProviderError::InvalidResponse("tool call is missing id".into())
+                                })?;
+                        if pending.name.trim().is_empty() {
+                            return Err(ProviderError::InvalidResponse(
+                                "tool call is missing function name".into(),
+                            ));
+                        }
+                        let arguments = serde_json::from_str(&pending.arguments).map_err(|_| {
+                            ProviderError::InvalidResponse(
+                                "tool call arguments are not valid JSON".into(),
+                            )
+                        })?;
+                        calls.push(ToolCall {
                             call_id,
                             name: pending.name,
                             arguments,
-                        },
-                    });
+                        });
+                    }
+                    // 全部验证成功才把结果交给调用方，不能一边校验一边向外 yield。
+                    events.extend(calls.into_iter().map(|call| ModelEvent::ToolCall { call }));
                 }
-                _ if self.pending_tool_call.is_some() => {
+                _ if !self.pending_tool_calls.is_empty() => {
                     return Err(ProviderError::InvalidResponse(
-                        "tool call data ended with a non-tool finish reason".to_string(),
+                        "tool call data ended with a non-tool finish reason".into(),
                     ));
                 }
                 _ => {}
@@ -224,26 +230,19 @@ impl OpenAiChatDecoder {
 
     // 累积函数，把多个SSE chunk 中零散的Tool call信息累积到 OpenAiChatDecoder.pending_tool_call
     fn push_tool_call_delta(&mut self, delta: ToolCallDelta) -> Result<(), ProviderError> {
-        if delta.index != 0 {
-            return Err(ProviderError::InvalidResponse(
-                "multiple tool calls are not supported in v1".to_string(),
-            ));
-        }
-
         if delta.kind.as_deref().is_some_and(|kind| kind != "function") {
             return Err(ProviderError::InvalidResponse(
-                "unsupported tool call type".to_string(),
+                "unsupported tool call type".into(),
             ));
         }
 
-        let pending = self.pending_tool_call.get_or_insert_with(Default::default);
+        let pending = self.pending_tool_calls.entry(delta.index).or_default();
 
-        //if let Some(id) = delta.id {
         if let Some(id) = delta.id.filter(|id| !id.is_empty()) {
             match &pending.id {
                 Some(current) if current != &id => {
                     return Err(ProviderError::InvalidResponse(
-                        "tool call id changed during streaming".to_string(),
+                        "tool call id changed during streaming".into(),
                     ));
                 }
                 None => pending.id = Some(id),
@@ -380,16 +379,95 @@ mod tests {
 
     #[test]
     fn reasoning_does_not_relax_tool_call_validation() {
-        for call in [json!({"index": 1}), json!({"index": 0, "id": "changed-id"})] {
-            let mut decoder = OpenAiChatDecoder::default();
-            decoder.push_data(r#"{"choices":[{"index":0,"delta":{"reasoning_content":"分析","tool_calls":[{"index":0,"id":"fixture-call","function":{"name":"web_search","arguments":"{}"}}]}}]}"#).unwrap();
-            assert!(matches!(
-                decoder.push_data(
-                    &json!({"choices": [{"index": 0, "delta": {"tool_calls": [call]}}]})
+        let mut decoder = OpenAiChatDecoder::default();
+        decoder
+            .push_data(
+                &json!({"choices":[{"index":0,"delta":{
+                    "reasoning_content":"R",
+                    "tool_calls":[{"index":0,"id":"fixture-call","function":{
+                        "name":"web_search","arguments":"{}"
+                    }}]
+                }}]})
+                .to_string(),
+            )
+            .unwrap();
+        assert!(matches!(
+            decoder.push_data(
+                &json!({"choices":[{"index":0,"delta":{
+                    "tool_calls":[{"index":0,"id":"changed-id"}]
+                }}]})
+                .to_string()
+            ),
+            Err(ProviderError::InvalidResponse(_))
+        ));
+    }
+
+    #[test]
+    fn multiple_calls_accumulate_separately_and_emit_in_index_order() {
+        let mut decoder = OpenAiChatDecoder::default();
+        for call in [
+            json!({"index":1,"id":"b","type":"function","function":{"name":"web_search","arguments":""}}),
+            json!({"index":0,"id":"a","type":"function","function":{"name":"web_search","arguments":""}}),
+            json!({"index":1,"function":{"arguments":"{\"query\":"}}),
+            json!({"index":0,"id":"","function":{"arguments":"{\"query\":\"A\"}"}}),
+            json!({"index":1,"function":{"arguments":"\"B\"}"}}),
+        ] {
+            assert!(
+                decoder
+                    .push_data(
+                        &json!({"choices":[{"index":0,"delta":{
+                            "tool_calls":[call]
+                        }}]})
                         .to_string()
-                ),
-                Err(ProviderError::InvalidResponse(_))
-            ));
+                    )
+                    .unwrap()
+                    .is_empty()
+            );
         }
+        assert_eq!(
+            finish(&mut decoder, "tool_calls"),
+            vec![
+                ModelEvent::ToolCall {
+                    call: ToolCall {
+                        call_id: "a".into(),
+                        name: "web_search".into(),
+                        arguments: json!({"query":"A"}),
+                    }
+                },
+                ModelEvent::ToolCall {
+                    call: ToolCall {
+                        call_id: "b".into(),
+                        name: "web_search".into(),
+                        arguments: json!({"query":"B"}),
+                    }
+                },
+                ModelEvent::Finished {
+                    reason: FinishReason::ToolCalls
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn an_invalid_second_call_does_not_publish_the_first_call() {
+        let mut decoder = OpenAiChatDecoder::default();
+        let events = decoder
+            .push_data(
+                &json!({"choices":[{"index":0,"delta":{
+        "reasoning_content":"R",
+        "tool_calls":[
+            {"index":0,"id":"a","function":{"name":"web_search","arguments":"{}"}},
+            {"index":1,"id":"b","function":{"name":"web_search","arguments":"bad-json"}}
+        ]
+    },"finish_reason":"tool_calls"}]})
+                .to_string(),
+            )
+            .unwrap();
+        assert_eq!(
+            events,
+            vec![ModelEvent::ReasoningDelta { delta: "R".into() }]
+        );
+        assert!(decoder.push_data("[DONE]").is_err());
+        assert!(!decoder.is_done());
     }
 }

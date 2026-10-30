@@ -103,4 +103,8 @@ impl ToolRegistry {
             },
         }
     }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.tools.iter().any(|tool| tool.spec().name == name)
+    }
 }

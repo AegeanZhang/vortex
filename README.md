@@ -31,11 +31,15 @@ Tab 只补全；`/mo` 按 Enter 先补为 `/model`，再次按 Enter 打开独�
 Resize 主动重绘，按键 Release 与确认键 Repeat 已过滤；Paste、动态多行高度及更多命令
 仍未实现。完整契约见 [`TUI 接口设计`](docs/design/tui/interface.md#slash-命令与菜单)。
 
-工具版 v1 每个模型步骤只接受一个调用，一个 Turn 最多执行 4 次工具调用；第五次会失败。
-工具错误作为 `is_error = true` 的结果回填给模型，空白或重复调用 ID 则直接使 Turn 失败。
+每个模型步骤支持多个工具调用，按批次顺序逐个执行、全部结果回填后再请求模型。
+调用额度按工具名、按用户 Turn 计算：web_search 内置 4 次，其他工具每种默认 50 次，
+用户 `tools.call_limits` 可覆盖。整批 ID/额度预检通过才写声明和执行，超限整批拒绝；
+已注册工具失败不退额，未知工具不扣实际执行额度，新 Turn 重置。异常任务保留已完成
+结果，并为未完成调用补齐未知/未执行的错误结果。工具错误以 `is_error = true` 回填，
+空白或批内/历史/跨步骤重复调用 ID 则使 Turn 失败。
 TUI 仅用状态栏展示工具开始/完成，不显示工具卡片或来源引用。设计见
 [Agent loop](docs/design/runtime/agent-loop.md) 与 [网页搜索设计](docs/design/tools/web-search.md)。秘塔工具已实现参数校验、超时和
-响应/输出大小限制，但注册表尚无通用 Schema 校验、工具超时或预算治理。
+响应/输出大小限制，但尚无通用 Schema 校验、统一工具超时、并发调度或全局模型步骤/Token/费用预算。
 思考历史回传、会话恢复、网页正文读取、MCP 和沙箱仍未实现。
 
 `list_directory` 只列启动 cwd 内指定目录的直接子项，不执行 Shell、不读正文、不写文件。
@@ -156,6 +160,17 @@ placeholder 前，模型窗口打开和输入区无可用单元格时隐藏。�
 Windows/macOS 未验收。当前事件链无法在未收到提交字符时感知组合开始，此时仍保留
 视觉 placeholder；不把硬件光标测试等同于 IME 组合事件支持，详见 [输入边界](docs/design/tui/interface.md#prompteditor-边界)。
 
+多工具与按工具额度补充验证（2026-10-30）：已接入按 index 组装的多调用批次、顺序执行、
+用户 tools.call_limits、每 Turn 独立计数和异常历史补齐。迁移原有测试并新增 18 项，覆盖
+交错 SSE 参数、整批校验/预算拒绝、完整 wire 数组、50/51 边界、重复 ID、失败不退额、
+新 Turn 重置，以及批次第二项 panic 后第一项成功保留、剩余结果补齐和下一轮历史完整。
+`cargo test --workspace --all-features --locked --offline --quiet` 通过，共 210 项
+（CLI 17、Core 47、Diagnostics 11、Provider 单元 32 与集成 6、Tools 22、TUI 74、沙箱模板 1）。
+全工作区严格 Clippy（all-targets/all-features、locked/offline）通过；作者格式化后
+`cargo fmt --all -- --check` 复核通过。HTTP fixture 需允许监听本机回环端口，不调用真实 API。
+本轮未运行 Release 构建、真实模型/搜索与终端验收；此前 Issue #3 的单调用限制已由本地
+实现和离线测试替代，Issue 状态及真实 Qwen Thinking 多调用往返仍待作者验收确认。
+
 ## 首版方向
 
 - Linux 优先，提供交互式 TUI；同时规划 `vortex exec "<task>"` 单次执行模式。
@@ -201,6 +216,7 @@ TUI 配置优先级为内置默认值 → 用户 `<vortex-home>/config.toml` →
 `.vortex/project.toml` → 重复 `-c`（后者优先）→ `-m`。HOME 默认是原生用户主目录下
 `.vortex`，显式 `VORTEX_HOME` 必须是非空绝对路径；日志与配置共用同一解析结果。
 项目配置不向父目录查找，只能引用已有模型、关闭搜索或降低条数，不能新增服务地址或凭据来源。
+工具调用额度只允许用户 config.toml 设置，不支持 project.toml 或 `-c`；修改后需重启。
 
 Provider profile 定义连接、接口方言与密钥变量名，模型 profile 定义服务端模型、能力和请求选项。
 thinking.mode 支持 provider-default（省略参数，不等于关闭）、disabled，以及显式预设
@@ -248,7 +264,7 @@ cargo run -p vortex-cli --locked -- -c 'search.backend="mock"'
 
 1. 初始化 Rust 2024 Cargo workspace，完成 Provider 抽象、Session 事件接口和非流式 TUI v1。（已完成）
 2. 补齐文本 SSE、Mock 工具循环、Provider 转换和 TUI 工具状态测试，完成真实终端验收。
-3. 秘塔真实搜索与单层目录列表已接入，搜索正常路径已由作者人工跑通，目录工具已补离线测试；Qwen Thinking 展示与专项离线测试已接入，继续真实工具往返和搜索异常验收，再扩展其他工具及通用预算治理；重绘节流、思考历史回传和 Turn 取消独立推进。
+3. 秘塔搜索、单层目录列表、Qwen Thinking 展示、多调用顺序执行与按工具额度已接入并补离线测试；搜索原正常路径已由作者跑通，继续真实多调用工具往返和搜索异常验收，再扩展其他工具及模型步骤/Token/费用预算；重绘节流、思考历史回传和 Turn 取消独立推进。
 4. 模型/搜索 TOML 配置与 `/model` 首版已接入，旧菜单回归已适配；思考选项装配及离线测试已完成，继续补其他配置/切换专项和真实交互验收。
 5. 实现 JSONL 会话恢复、`bubblewrap` 沙箱和 stdio MCP client，并将 exec 迁移到共享 Session。
 6. 完善安装、CI、发布包、可观测性与跨平台抽象。

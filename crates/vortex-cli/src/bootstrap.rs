@@ -48,7 +48,7 @@ pub(crate) async fn start_tui_session(
     use crate::model_factory::ConfiguredModelFactory;
     use std::sync::Arc;
     use vortex_core::config::{ConfigPaths, load_config};
-    use vortex_core::{ModelManager, start_session};
+    use vortex_core::{ModelManager, ToolCallLimits, start_session_with_tool_limits};
 
     let config_paths = ConfigPaths {
         user: paths.user_config.clone(),
@@ -61,6 +61,7 @@ pub(crate) async fn start_tui_session(
     .await??;
     report_config_sources(paths, &loaded.sources);
     let config = loaded.config;
+    let limits = ToolCallLimits::new(config.tools.call_limits.clone())?;
 
     let workspace_root = paths.cwd.clone();
     let workspace =
@@ -84,7 +85,7 @@ pub(crate) async fn start_tui_session(
         model_id = %selected.id, provider_id = %selected.provider_id,
         endpoint_host = %selected.endpoint_host, "TUI session configured",
     );
-    Ok(start_session(models, tools))
+    Ok(start_session_with_tool_limits(models, tools, limits))
 }
 
 fn report_config_sources(

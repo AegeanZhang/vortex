@@ -1,6 +1,6 @@
 # 目录列表工具设计
 
-核对日期：2026-10-26。状态：当前实现契约。架构归属：工具执行与资源访问。
+核对日期：2026-10-30。状态：当前实现契约。架构归属：工具执行与资源访问。
 源码入口：[list_directory.rs](../../../crates/vortex-tools/src/list_directory.rs)、[workspace_fs.rs](../../../crates/vortex-tools/src/workspace_fs.rs)。实际检查结果见根 [README](../../../README.md)，验收要求不代表已经通过。
 
 本文件维护目录访问与输出边界，公共调用/结果见 [工具接口](tool-registry.md)，
@@ -55,7 +55,9 @@ CLI 在进入 TUI 前，通过 `spawn_blocking` 将启动时 `AppPaths.cwd` 打�
 释放额度；已开始的阻塞操作无法被 async abort 强制停止。没有硬 I/O 超时，挂起的网络盘
 仍可能拖延 runtime 退出；不能由扫描预算推断时长有界。
 
-模型可多轮逐层查看子目录，仍共享每 Turn 四次工具调用预算。目录名与文件名是不可信数据，
+模型可多轮逐层查看子目录；list_directory 每用户 Turn 默认 50 次尝试，用户
+tools.call_limits 可覆盖，与 web_search 独立计数。它不替代扫描量或输出大小限制。
+目录名与文件名是不可信数据，
 也可能包含私密信息，会随 ToolResult 发给当前模型供应商；固定隐藏规则不等于秘密检测。
 该句柄边界不是审批系统、进程沙箱或目录快照；其他进程仍可修改/重命名目录。Linux 为
 当前验证平台，Windows junction/reparse point 与挂载边界需另行验收。

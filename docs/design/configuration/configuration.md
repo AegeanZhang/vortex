@@ -40,6 +40,7 @@ Thinking 预设、可选覆盖及显式 Enabled 的配置已接入；当前仅�
 
 - 不同 Provider/模型 ID 合并；同 ID 的条目整条替换，不逐字段拼接旧连接或旧请求选项。
 - 用户/项目搜索设置只覆盖显式出现的字段；`false` 是有效值，不是缺省。
+- 用户工具调用额度按工具名合并，未覆盖的内置规则保留；项目和 `-c` 不支持额度字段。
 - Provider 未写 `api_flavor` 时为 `generic`；模型未写 `thinking` 时为 `provider-default`，未写预设为 None、能力覆盖逐字段为 None。运行时从全 false 基线解析预设与覆盖；整条替换不继承旧策略、预设或能力。
 - 首版内置 Qwen 模型与秘塔默认搜索以兼容现有 TUI。添加其他模型不删除内置条目，不读取未选中模型的密钥。
 - 配置在启动时读取一次；编辑文件需重启，不影响已经运行的 Session。
@@ -74,6 +75,10 @@ api_key_env = "METASO_API_KEY"
 max_results = 5
 connect_timeout_secs = 5
 request_timeout_secs = 20
+
+[tools.call_limits]
+web_search = 4
+list_directory = 50
 ```
 
 Provider 定义协议、接口方言、地址和凭据变量名；模型 profile 定义 Provider 引用、服务端模型名、显示名、工具能力、思考策略及思考能力。同一 Provider 可供多个模型复用，但模型请求选项独立。
@@ -143,8 +148,24 @@ ProviderDefault 不发送控制参数，但当前输出策略仍为 Reject，不
 
 搜索开关只控制 `web_search`。TUI 始终注册 `list_directory`，关闭搜索后仍可查看启动
 工作区的单层列表，不需要搜索 key，但仍需要模型 key 与模型工具调用能力。本轮没有
-`files.enabled`、可配置根目录或目录工具预算字段；路径、隐藏项与输出限制是工具硬边界，
+`files.enabled` 或可配置根目录；路径、隐藏项与输出限制是工具硬边界，
 见 [目录工具契约](../tools/list-directory.md#目录列表list_directory-v1)。
+
+### 工具调用额度
+
+用户 `<vortex-home>/config.toml` 可设置 `[tools.call_limits]`，例如上例；不设置即可使用
+内置 `web_search=4`，其他工具每种每 Turn 默认 50 次。`list_directory=50` 只是显式写出
+默认值，不是必填字段；只覆盖它也不会移除搜索默认额度。秘塔与 Mock 都使用 web_search 名称。
+
+每个值必须是 `1..=4294967295` 的整数；50 是可覆盖的默认值，不是显式配置的硬上限。
+工具名为 1–128 个 ASCII 字母、数字、下划线或连字符；允许预先配置尚未注册的工具名，
+但不会因此注册工具。零、负数、字符串、越界或非法名称均拒绝，不提供无限制语义。
+
+额度是每工具、每用户 Turn 的尝试次数，跨模型步骤累计；新 Turn 重置，错误尝试不退额。
+执行前先预检整批，超限整批不执行；未知工具不扣实际执行额度。它与搜索结果条数、
+目录扫描量、超时、Token 或收费统计不同，详见 [Agent loop](../runtime/agent-loop.md)。
+此字段只允许用户配置，不允许项目配置或 `-c`；修改后重启，不热重载或写回文件。
+CLI 在移动 AppConfig 到模型工厂之前构造 ToolCallLimits，再注入 Session。
 
 ### 字段约束
 
@@ -162,6 +183,7 @@ ProviderDefault 不发送控制参数，但当前输出策略仍为 Reject，不
 | thinking_preset | 可选模型字段，形式同 profile ID；当前仅识别 `dashscope-qwen-display-only`，并要求 dashscope 方言 |
 | thinking_capabilities | 可选 can_enable、can_disable、supports_history_control 布尔覆盖；省略不覆盖，显式 false 覆盖预设 true |
 | 搜索数量/超时 | 1–5 条、连接 1–30 秒、总请求 1–120 秒；连接超时不大于总超时 |
+| tools.call_limits | 仅用户配置；工具名 1–128 个 ASCII 字母/数字/下划线/连字符，值为正 u32 |
 | 配置体积/数量 | 每文件最多 64 KiB，Provider 最多 16 个，模型最多 64 个且非空 |
 
 `supports_tools` 是配置声明，不是远程探测结果。CLI 按实际注册表计算 `requires_tools`，
@@ -186,7 +208,7 @@ max_results = 3
 - `search.enabled`：允许关闭；不能重新开启用户层已关闭的搜索。
 - `search.max_results`：允许降低已有条数，不得提高或设为零。
 
-项目不能新增或修改 Provider、模型定义、接口方言、思考策略或能力、密钥变量名、服务地址、搜索后端和超时。未知或禁止字段必须报错，不能静默忽略。用户显式 CLI 覆盖仍可改变搜索开关/数量，但必须满足产品硬限制。
+项目不能新增或修改 Provider、模型定义、接口方言、思考策略或能力、密钥变量名、服务地址、搜索后端、超时和工具调用额度。未知或禁止字段必须报错，不能静默忽略。用户显式 CLI 覆盖仍可改变搜索开关/数量，但必须满足产品硬限制。
 
 这种字段限制不等于完整 workspace trust：用户层默认可信，项目仍可能从已有 profile 中改变本次请求目标，因此启动信息必须显示最终模型与 Provider。开启搜索会将查询发送给搜索服务；切换 Provider 后，后续请求会把当前历史发送给新服务。
 
@@ -257,6 +279,7 @@ Vortex HOME: /home/ming/.vortex
 - 项目越权、非法链接/路径、配置来源与 cwd-only 行为可重复验证。
 - 相同 Provider 的不同模型请求选项互不串用；选项省略和旧位置有明确结果。
 - 模型/搜索配置实际进入请求和工具限制，不仅改变 UI 标签。
+- tools.call_limits 按名称合并、保留默认项；非法值拒绝，项目和 `-c` 不能覆盖；新 Turn 重置计数。
 - `/model` 成功/失败、Running 拒绝、保留历史、不写文件、重启恢复默认值。
 - 文件与 API 测试使用 TempDir、fake 和本地 fixture，不调用真实付费接口；Windows 路径和权限在 Windows 单独验证。
 

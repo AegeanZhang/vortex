@@ -1,4 +1,3 @@
-//use super::QwenThinkingOptions;
 use super::options::ThinkingRequestFields;
 use serde::Serialize;
 use vortex_core::{ConversationItem, MessageRole, ModelRequest, ToolCall, ToolSpec};
@@ -10,7 +9,7 @@ enum ChatMessage {
         role: &'static str,
         content: String,
     },
-    AssistantToolCall {
+    AssistantToolCalls {
         role: &'static str,
         content: Option<String>,
         tool_calls: Vec<ChatToolCall>,
@@ -50,18 +49,21 @@ struct ChatFunctionDefinition {
     parameters: serde_json::Value,
 }
 
-fn map_tool_call(call: ToolCall, content: Option<String>) -> ChatMessage {
-    ChatMessage::AssistantToolCall {
+fn map_tool_calls(calls: Vec<ToolCall>, content: Option<String>) -> ChatMessage {
+    ChatMessage::AssistantToolCalls {
         role: "assistant",
         content,
-        tool_calls: vec![ChatToolCall {
-            id: call.call_id,
-            kind: "function",
-            function: ChatFunctionCall {
-                name: call.name,
-                arguments: call.arguments.to_string(),
-            },
-        }],
+        tool_calls: calls
+            .into_iter()
+            .map(|call| ChatToolCall {
+                id: call.call_id,
+                kind: "function",
+                function: ChatFunctionCall {
+                    name: call.name,
+                    arguments: call.arguments.to_string(),
+                },
+            })
+            .collect(),
     }
 }
 
@@ -77,47 +79,27 @@ fn map_tool_spec(spec: ToolSpec) -> ChatTool {
 }
 
 fn map_messages(items: Vec<ConversationItem>) -> Vec<ChatMessage> {
-    let mut source = items.into_iter().peekable();
-    let mut messages = Vec::new();
-
-    while let Some(item) = source.next() {
-        match item {
-            ConversationItem::Message(message) => {
-                let role = match message.role {
+    items
+        .into_iter()
+        .map(|item| match item {
+            ConversationItem::Message(message) => ChatMessage::Text {
+                role: match message.role {
                     MessageRole::User => "user",
                     MessageRole::Assistant => "assistant",
                     MessageRole::System => "system",
-                };
-
-                if message.role == MessageRole::Assistant
-                    && matches!(source.peek(), Some(ConversationItem::ToolCall(_)))
-                {
-                    let Some(ConversationItem::ToolCall(call)) = source.next() else {
-                        unreachable!("peek confirmed the next item is a tool call");
-                    };
-
-                    messages.push(map_tool_call(call, Some(message.content)));
-                } else {
-                    messages.push(ChatMessage::Text {
-                        role,
-                        content: message.content,
-                    });
-                }
+                },
+                content: message.content,
+            },
+            ConversationItem::AssistantToolCalls { content, calls } => {
+                map_tool_calls(calls, content)
             }
-            ConversationItem::ToolCall(call) => {
-                messages.push(map_tool_call(call, None));
-            }
-            ConversationItem::ToolResult(result) => {
-                messages.push(ChatMessage::ToolResult {
-                    role: "tool",
-                    tool_call_id: result.call_id,
-                    content: result.output,
-                });
-            }
-        }
-    }
-
-    messages
+            ConversationItem::ToolResult(result) => ChatMessage::ToolResult {
+                role: "tool",
+                tool_call_id: result.call_id,
+                content: result.output,
+            },
+        })
+        .collect()
 }
 
 // Wire 类型
@@ -242,15 +224,14 @@ mod tests {
                     role: MessageRole::User,
                     content: "fixture prompt".into(),
                 }),
-                ConversationItem::Message(SessionMessage {
-                    role: MessageRole::Assistant,
-                    content: "fixture prefix".into(),
-                }),
-                ConversationItem::ToolCall(ToolCall {
-                    call_id: "fixture-call".into(),
-                    name: "web_search".into(),
-                    arguments: json!({"query": "rust"}),
-                }),
+                ConversationItem::AssistantToolCalls {
+                    content: Some("fixture prefix".into()),
+                    calls: vec![ToolCall {
+                        call_id: "fixture-call".into(),
+                        name: "web_search".into(),
+                        arguments: json!({"query": "rust"}),
+                    }],
+                },
                 ConversationItem::ToolResult(ToolResult {
                     call_id: "fixture-call".into(),
                     output: "fixture result".into(),
@@ -314,5 +295,59 @@ mod tests {
             }
             assert_eq!(serde_json::to_value(request).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn a_batch_maps_to_one_assistant_and_all_tool_results() {
+        let calls: Vec<_> = ["a", "b"]
+            .into_iter()
+            .map(|id| ToolCall {
+                call_id: id.into(),
+                name: "web_search".into(),
+                arguments: json!({"query":id}),
+            })
+            .collect();
+        let mut items = vec![ConversationItem::AssistantToolCalls {
+            content: Some("prefix".into()),
+            calls: calls.clone(),
+        }];
+        items.extend(calls.iter().map(|call| {
+            ConversationItem::ToolResult(ToolResult {
+                call_id: call.call_id.clone(),
+                output: format!("result {}", call.call_id),
+                is_error: false,
+            })
+        }));
+        let request = ChatRequest::from_model_request(
+            "fixture-model".into(),
+            ModelRequest {
+                items,
+                tools: vec![],
+            },
+            ThinkingRequestFields::default(),
+        );
+        let value = serde_json::to_value(request).unwrap();
+        let messages = value["messages"].as_array().unwrap();
+        assert_eq!(
+            messages,
+            json!([
+                {
+                    "role": "assistant", "content": "prefix",
+                    "tool_calls": [
+                        {"id": "a", "type": "function", "function": {
+                            "name": "web_search", "arguments": "{\"query\":\"a\"}"
+                        }},
+                        {"id": "b", "type": "function", "function": {
+                            "name": "web_search", "arguments": "{\"query\":\"b\"}"
+                        }},
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "a", "content": "result a"},
+                {"role": "tool", "tool_call_id": "b", "content": "result b"},
+            ])
+            .as_array()
+            .unwrap()
+        );
+        assert!(!value.to_string().contains("reasoning_content"));
     }
 }

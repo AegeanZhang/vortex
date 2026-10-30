@@ -223,7 +223,7 @@ RUST_LOG=info,vortex_tools=debug cargo run -p vortex-cli --locked
 - 当前成功工具输出包含 `backend: "metaso"`、`query`、`results` 和 `truncated`；
   每条结果包含标题、URL 和片段。后续用受控 fake 测试断言 ToolCall/ToolResult 回填，
   不以模型声称“已经搜索”或回答看起来很新作为执行证据。
-- 工具版只显示 notice，没有来源卡片；每个模型步骤最多一个调用，每个 Turn 最多 4 次。
+- 工具版只显示 notice，没有来源卡片；每步可含多个调用，本地顺序执行，搜索默认每 Turn 4 次。
 - 空结果、认证/限流错误、超时、非 JSON 和超大响应优先用本地 fixture 做回归，不为
   制造错误反复调用付费接口；搜索期间输入 `/exit` 应能中止等待并恢复终端。
 
@@ -259,7 +259,7 @@ cwd，不是 Git 根、Cargo manifest 目录或 Vortex HOME；切换启动目录
 
 返回值包含相对 `path`、子项 `name/type`、`truncated` 和 `truncation_reasons`。
 最多扫描 4096 项，最终 JSON 最多 16 KiB；截断意味着列表不完整，重复调用不保证获得
-下一页。优先缩小到明确子目录，逐层探索仍受每 Turn 四次工具调用预算限制。
+下一页。优先缩小到明确子目录，逐层探索受目录工具独立额度限制，默认每 Turn 50 次。
 TUI 不直接显示文件树或原始工具 JSON，模型接收结果后生成回答。
 
 离线用例已验证目录工具与装配，真实模型/TUI 目录往返仍待人工验收。例如，在自己明确
@@ -271,6 +271,22 @@ TUI 不直接显示文件树或原始工具 JSON，模型接收结果后生成�
 工具尚无审批系统、进程沙箱或硬 I/O 超时，已开始的阻塞读取不会因 `/exit` 强制终止，
 挂起的网络盘可能拖延退出。Linux 离线测试不代表 Windows junction 等边界已验收。
 完整契约见 [目录列表工具](../design/tools/list-directory.md)。
+
+### 工具调用额度
+
+无需新增配置即可使用默认额度：每个用户 Turn 内，web_search 最多 4 次，其他工具每种
+最多 50 次。用户 `<vortex-home>/config.toml` 可显式覆盖，例如：
+
+```toml
+[tools.call_limits]
+web_search = 4
+list_directory = 50
+```
+
+配置按名称合并，值必须是正 u32，可超过 50；项目 project.toml 和 `-c` 不支持这些字段，
+修改后需重启。新输入重新计数；已注册工具失败也占一次，未知工具不扣实际执行额度。
+模型同批请求超过剩余额度时，整批拒绝执行，本轮显示预算错误；不会只执行能容纳的部分。
+额度不等于模型请求数、Token 或费用限制，规则见 [配置设计](../design/configuration/configuration.md#工具调用额度)。
 
 ### 选择与复制文本
 

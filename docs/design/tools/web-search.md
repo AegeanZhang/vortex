@@ -1,6 +1,6 @@
 # 网页搜索工具设计
 
-核对日期：2026-10-27。状态：当前实现契约。架构归属：工具执行与资源访问。
+核对日期：2026-10-30。状态：当前实现契约。架构归属：工具执行与资源访问。
 源码入口：[metaso_web_search.rs](../../../crates/vortex-tools/src/metaso_web_search.rs)、[mock_web_search.rs](../../../crates/vortex-tools/src/mock_web_search.rs)。实际检查结果见根 [README](../../../README.md)，验收要求不代表已经通过。
 
 当前提供同名 web_search 的秘塔与 Mock 两种实现，按配置只装配其一；默认秘塔，
@@ -79,7 +79,9 @@ Mock 不发 HTTP，也没有 search wire 请求记录。
 
 256 KiB 是正文消费上限，不承诺 HTTP/TLS 缓冲完全不占额外内存。可配置的异步 timeout（默认 20 秒）
 包围请求和正文读取，但不能抢占同步 JSON 解析；映射仍依赖小体积预算控制工作量。
-四次工具轮数、单请求超时、响应大小与输出大小是不同限制，不能相互替代。
+web_search 默认每用户 Turn 4 次尝试，由 Core 计数，秘塔与 Mock 规则相同，可用用户
+tools.call_limits 覆盖。批次先预检、执行前扣额，参数或网络错误不退额；它与单请求超时、
+结果条数、响应大小、输出大小及实际收费统计不同，不能相互替代。
 
 只有第二个真实搜索后端出现且确有重复时，再提取 WebSearchBackend 和共用结果类型；
 通用网络预算在多个工具有共同需求时下沉。TOML 已承载搜索开关、后端、结果数量和超时，

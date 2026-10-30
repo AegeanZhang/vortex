@@ -1,6 +1,6 @@
 # 仓库与模块组织
 
-核对日期：2026-10-27。本文描述当前目录及 Cargo 依赖；逻辑职责见
+核对日期：2026-10-30。本文描述当前目录及 Cargo 依赖；逻辑职责见
 [模块视图](logical-modules.md)，未来拆分见 [架构演进](evolution.md)。
 
 ## 当前结构
@@ -60,14 +60,14 @@ Diagnostics 无兄弟 crate 依赖，Core/TUI 不依赖它；CLI 继续拥有文
 | crate | 当前模块与阅读入口 |
 | --- | --- |
 | `vortex-cli` | `src/main.rs` 分派模式；`paths.rs` 解析目录；`logging.rs` 初始化日志；`bootstrap.rs` 加载配置、注册工具并启动 Session；`model_factory.rs` 装配模型；`exec.rs` 是未迁移的单次 HTTP |
-| `vortex-core` | `src/config.rs` 包含配置类型、合并、校验及文件加载；`model.rs` 管理绑定；`conversation.rs` 定义历史项；`provider.rs`/`tool.rs` 定义接口；`agent_loop.rs` 执行单轮；`session.rs` 包含公共连接与 actor；`lib.rs` 导出 API |
+| `vortex-core` | `src/config.rs` 包含配置类型、合并、校验及文件加载；`model.rs` 管理绑定；`conversation.rs` 定义批次等历史项；`provider.rs`/`tool.rs` 定义接口；`tool_budget.rs` 管理调用规则/单轮计数；`agent_loop.rs` 执行单轮；`session.rs` 包含公共连接与 actor；`lib.rs` 导出 API |
 | `vortex-diagnostics` | `src/lib.rs` 保留库入口、按 debug_assertions 导出 `wire_trace`；`src/wire_trace.rs` 实现关联、日志副本与后台错误预览 |
 | `vortex-provider` | `src/openai_chat/mod.rs` 保存已装配实例；`options.rs` 转换思考字段；`thinking_presets.rs` 解析预设/覆盖；`request.rs` 映射 DTO；`decoder.rs` 组装增量；`stream.rs` 编排；`src/sse_transport.rs` 处理 HTTP/SSE |
 | `vortex-tools` | `src/workspace_fs.rs` 管理根句柄与相对路径；`list_directory.rs` 有界枚举；`metaso_web_search.rs` 及其 `request.rs`/`response.rs` 负责搜索与映射；`mock_web_search.rs` 返回固定结果 |
 | `vortex-tui` | `src/lib.rs` 入口与事件映射；`terminal.rs` 恢复终端；`event_loop.rs` 执行 Effect；`app.rs` 持有状态与 reducer；`action.rs` 定义 Action/Effect；`command.rs` 解析 slash；`ui.rs` 布局；`markdown.rs` 转换；`widgets/` 管理输入、菜单、模型窗口和 Transcript |
 | `vortex-sandbox` | `src/lib.rs` 只有 Cargo 初始化模板，不是可调用的隔离实现 |
 
-推荐从 `main → bootstrap → start_session` 理解装配，再沿 TUI 的
+推荐从 `main → bootstrap → start_session_with_tool_limits` 理解装配，再沿 TUI 的
 `event_loop → app::update → AgentHandle` 跟踪用户输入，最后阅读 Core 的
 `session → run_turn → Provider/Tool`。配套图见 [运行链路](runtime-flows.md)。
 

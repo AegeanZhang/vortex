@@ -1,6 +1,6 @@
 # 架构总览
 
-核对日期：2026-10-27。本文描述当前源码的整体结构；后续调整见 [架构演进](evolution.md)，
+核对日期：2026-10-30。本文描述当前源码的整体结构；后续调整见 [架构演进](evolution.md)，
 实际验证结果见根 [README](../../README.md)。逻辑模块不等同于 Rust module 或 Cargo crate。
 
 ## 系统定位与边界
@@ -69,8 +69,13 @@ Tokio 调度任务，并在 `config.rs` 中执行同步配置文件读取。
 ## 数据与控制边界
 
 Session 独占权威 `Vec<ConversationItem>`、状态与 `ModelManager`；每个 Turn 获取固定的
-Provider 和历史副本。Turn 完成一个工具步骤后通知 Session 记录，最终成功正文另行提交；
-失败步骤的部分正文不写入权威历史，已完成工具步骤保留。
+Provider、工具额度规则和历史副本。一次模型响应可声明多个调用，本地顺序执行；
+Session 先保存一条批次声明，再逐个提交真实结果，任务异常时补齐未完成结果。
+最终成功正文另行提交；失败步骤的部分正文不入历史，已完成工具结果保留。
+
+调用额度归 Turn：web_search 内置每 Turn 4 次，未显式配置的工具每种默认 50 次；用户
+TOML 可逐工具覆盖。整批预检、执行前扣额、失败不退额，新用户 Turn 重置。没有新增
+全局模型步骤、Token 或费用预算；规则及未知工具边界见 [Agent loop](../design/runtime/agent-loop.md)。
 
 TUI 的 Transcript、当前模型标签和响应阶段均为展示状态。`CoreEvent` 是实时通知，
 不是已经具备完整重放能力的事件存储；初始 Snapshot 也不是持久化或实时共享对象。

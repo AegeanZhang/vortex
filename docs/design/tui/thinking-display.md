@@ -5,6 +5,7 @@
 
 - 日期：2026-10-23。
 - 修订：2026-10-26，同步请求装配、事件链、TUI 投影与离线测试边界。
+- 修订：2026-10-30，同步多调用顺序执行、按工具额度与异常历史补齐。
 - 状态：描述当前展示-only 契约；实现及离线/人工验收记录以根 README 为准。
 - 目标：先完整观察一次模型步骤的公开思考与正文，以及工具前后的步骤边界，再推进上下文装配。
 - 关联：[SSE](../provider/streaming-response.md)、[思考选项](../provider/thinking-options.md)、
@@ -43,13 +44,14 @@ AssistantReasoningDelta { delta: String }, // CoreEvent 名称
 // 内部 TurnProgress 对应 ReasoningDelta { delta: String }。
 ```
 
-每次 provider.stream 前发送 ModelStepStarted，从 1 开始。现有四次工具执行上限下，
-可有第五个模型步骤生成最终回答；step 不是工具次数，也不是新的 TurnId。
+每次 provider.stream 前发送 ModelStepStarted，从 1 开始。同一步可返回多个调用，
+本地逐个执行完再进入下一模型步骤；step 不是工具次数，也不是新的 TurnId。
+每工具额度独立，耗尽后仍可请求最终回答；没有新增全局模型步骤上限。
 
 ```text
 UserMessageAdded → AssistantMessageStarted
   → ModelStepStarted(1) → Reasoning* / Text*
-  → ToolCallStarted → ToolCallFinished
+  → (ToolCallStarted → ToolCallFinished) × 本批调用数
   → ModelStepStarted(2) → Reasoning* / Text*
   → TurnCompleted 或 TurnFailed
 ```
@@ -104,13 +106,14 @@ DisplayOnly 思考的业务展示仅存当前 TUI 内存，不写模型历史、
 
 ### 人工验收与已知限制
 
-作者已反馈诗词类纯文本请求可显示 Thinking，不能由此认定工具往返已通过。搜索时
-观察到 `multiple tool calls are not supported in v1`，见
-[Issue #3](https://github.com/AegeanZhang/vortex/issues/3)：当前单次模型响应仅接受一个调用，
-Decoder 拒绝非零工具索引，Core 同样拒绝第二个调用；请求尚未发送 parallel_tool_calls=false。
-该限制与整个 Turn 四次工具预算不同，不在本轮修复。
+作者已反馈诗词类纯文本请求可显示 Thinking，不能由此认定工具往返已通过。此前搜索的
+`multiple tool calls are not supported in v1` 记录于
+[Issue #3](https://github.com/AegeanZhang/vortex/issues/3)。当前 Decoder 已按索引组装多个
+调用，Core 支持批次与顺序执行，不再保留单调用限制；请求仍不发送 parallel_tool_calls=false。
+离线修复不等于真实服务验收或 Issue 已关闭。
 
-离线工具脚本已验证分步事件、不回填思考及预算边界，真实 Qwen 工具往返仍待验收。
+离线工具脚本已验证分步事件、不回填思考、批次/额度及异常补齐；公开 CoreEvent 未新增
+批次事件，TUI 仍逐项更新工具状态。真实 Qwen 工具往返仍待验收。
 DeepSeek Enabled 在本地选项校验时拒绝；添加 can_enable 或套用 Qwen 预设不能接通它。
 
 ## 6. 后续边界

@@ -33,6 +33,8 @@
 | 思考能力预设 | 显式声明某个接入的能力和历史适用契约；不是在线探测，也不创造远端能力 |
 | Context assembler | 后续用于组装指令、选择历史和执行 Token 预算的职责；当前未实现 |
 | Tool / ToolRegistry | 工具执行接口及其注册/分派；具体工具当前为目录列表和搜索，没有通用审批或 Schema 验证器 |
+| 工具批次 / AssistantToolCalls | 一次模型响应的前缀及全部调用组成一条历史声明，随后回填各自结果；本地顺序执行 |
+| ToolCallLimits / TurnToolBudget | 前者是可克隆的每工具规则，后者是单用户 Turn 的使用计数；不等于模型步骤、Token 或费用预算 |
 | Workspace | 当前产品中以启动 cwd 为根的目录访问边界；不是 Git 根，也不是已生效的文件写入沙箱 |
 | Vortex HOME | 默认用户主目录下 .vortex，可由绝对路径 VORTEX_HOME 覆盖；存用户配置与日志，区别于安装位置和 cwd |
 | Shutdown / CancelTurn | 当前 Shutdown 结束整个 Session；保留会话的 CancelTurn 尚未实现 |

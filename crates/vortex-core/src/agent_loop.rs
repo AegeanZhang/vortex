@@ -4,10 +4,11 @@ use tokio::sync::mpsc;
 
 use crate::{
     ConversationItem, FinishReason, MessageRole, ModelEvent, ModelProvider, ModelRequest,
-    ProviderError, ReasoningOutputPolicy, SessionMessage, ToolCall, ToolRegistry, ToolResult,
+    ProviderError, ReasoningOutputPolicy, SessionMessage, ToolBudgetExceeded, ToolCall,
+    ToolCallLimits, ToolRegistry, ToolResult, tool_budget::TurnToolBudget,
 };
 
-const MAX_TOOL_ROUNDS: usize = 4;
+//const MAX_TOOL_ROUNDS: usize = 4;
 const MAX_REASONING_BYTES_PER_MODEL_STEP: usize = 256 * 1024;
 
 #[derive(Debug)]
@@ -18,8 +19,12 @@ pub(crate) enum TurnProgress {
     ToolStarted {
         call: ToolCall,
     },
+    ToolBatchStarted {
+        content: Option<String>,
+        calls: Vec<ToolCall>,
+    },
     ToolFinished {
-        assistant_prefix: Option<String>,
+        //assistant_prefix: Option<String>,
         call: ToolCall,
         result: ToolResult,
     },
@@ -40,7 +45,8 @@ pub(crate) struct TurnOutput {
 pub(crate) enum TurnError {
     Provider(ProviderError),
     InvalidModelSequence(String),
-    ToolRoundLimit { limit: usize },
+    //ToolRoundLimit { limit: usize },
+    ToolBudgetExceeded(ToolBudgetExceeded),
     ProgressChannelClosed,
     ReasoningLimitExceeded { limit: usize },
 }
@@ -52,8 +58,9 @@ impl fmt::Display for TurnError {
             Self::InvalidModelSequence(message) => {
                 write!(formatter, "invalid model event sequence: {message}")
             }
-            Self::ToolRoundLimit { limit } => {
-                write!(formatter, "tool round limit exceeded: {limit}")
+            //Self::ToolRoundLimit { limit } => {
+            Self::ToolBudgetExceeded(error) => {
+                write!(formatter, "{error}")
             }
             Self::ProgressChannelClosed => {
                 write!(formatter, "turn progress channel is closed")
@@ -80,6 +87,12 @@ impl From<ProviderError> for TurnError {
     }
 }
 
+impl From<ToolBudgetExceeded> for TurnError {
+    fn from(error: ToolBudgetExceeded) -> Self {
+        Self::ToolBudgetExceeded(error)
+    }
+}
+
 async fn send_progress(
     sender: &mpsc::Sender<TurnProgress>,
     progress: TurnProgress,
@@ -95,6 +108,7 @@ pub(crate) async fn run_turn(
     tools: ToolRegistry,
     history: Vec<ConversationItem>,
     progress: mpsc::Sender<TurnProgress>,
+    limits: ToolCallLimits,
 ) -> Result<TurnOutput, TurnError> {
     let mut context = history;
 
@@ -102,13 +116,15 @@ pub(crate) async fn run_turn(
     // - 后续登记新 ID，阻止当前 Turn 的多个模型步骤复用 ID
     let mut seen_tool_call_ids: BTreeSet<String> = context
         .iter()
-        .filter_map(|item| match item {
-            ConversationItem::ToolCall(call) => Some(call.call_id.clone()),
-            _ => None,
+        .flat_map(|item| match item {
+            ConversationItem::AssistantToolCalls { calls, .. } => calls.as_slice(),
+            _ => &[],
         })
+        .map(|call| call.call_id.clone())
         .collect();
 
-    let mut tool_rounds = 0;
+    //let mut tool_rounds = 0;
+    let mut budget = TurnToolBudget::new(limits);
     let reasoning_policy = provider.reasoning_output_policy();
     let mut model_step = 0_u32;
 
@@ -127,7 +143,7 @@ pub(crate) async fn run_turn(
         };
         let mut stream = provider.stream(request);
         let mut content = String::new();
-        let mut tool_call = None;
+        let mut tool_calls = Vec::new();
         let mut finish_reason = None;
 
         while let Some(item) = stream.next().await {
@@ -139,7 +155,7 @@ pub(crate) async fn run_turn(
                 ModelEvent::ReasoningDelta { delta } => {
                     if reasoning_policy != ReasoningOutputPolicy::DisplayOnly {
                         return Err(TurnError::InvalidModelSequence(
-                            "reasoning output is not enabled for this provider".to_string(),
+                            "reasoning output is not enabled for this provider".into(),
                         ));
                     }
                     if delta.is_empty() {
@@ -153,19 +169,14 @@ pub(crate) async fn run_turn(
                     }
                     send_progress(&progress, TurnProgress::ReasoningDelta { delta }).await?;
                 }
-                ModelEvent::ToolCall { call } => {
-                    if tool_call.replace(call).is_some() {
-                        return Err(TurnError::InvalidModelSequence(
-                            "multiple tool calls are not supported in v1".to_string(),
-                        ));
-                    }
-                }
+                ModelEvent::ToolCall { call } => tool_calls.push(call),
                 ModelEvent::Finished { reason } => {
                     finish_reason = Some(reason);
                     break;
                 }
             }
         }
+        drop(stream);
 
         let finish_reason = finish_reason.ok_or_else(|| {
             TurnError::InvalidModelSequence(
@@ -175,14 +186,14 @@ pub(crate) async fn run_turn(
 
         match finish_reason {
             FinishReason::Stop => {
-                if tool_call.is_some() {
+                if !tool_calls.is_empty() {
                     return Err(TurnError::InvalidModelSequence(
-                        "tool call ended with stop finish reason".to_string(),
+                        "tool call ended with stop finish reason".into(),
                     ));
                 }
                 if content.is_empty() {
                     return Err(TurnError::InvalidModelSequence(
-                        "response does not contain assistant content".to_string(),
+                        "response does not contain assistant content".into(),
                     ));
                 }
 
@@ -194,67 +205,72 @@ pub(crate) async fn run_turn(
                 });
             }
             FinishReason::ToolCalls => {
-                let call = tool_call.ok_or_else(|| {
-                    TurnError::InvalidModelSequence(
-                        "tool_calls finish reason without a tool call".to_string(),
-                    )
-                })?;
-
-                if tool_rounds >= MAX_TOOL_ROUNDS {
-                    return Err(TurnError::ToolRoundLimit {
-                        limit: MAX_TOOL_ROUNDS,
-                    });
-                }
-
-                // 只检查是否为空，不修改Provider 返回的原始 ID.
-                if call.call_id.trim().is_empty() {
+                if tool_calls.is_empty() {
                     return Err(TurnError::InvalidModelSequence(
-                        "tool call id must not be empty".to_string(),
+                        "tool_calls finish reason without a tool call".into(),
                     ));
                 }
 
-                // insert 返回 false，表示集合中已经存在这个ID.
-                if !seen_tool_call_ids.insert(call.call_id.clone()) {
-                    return Err(TurnError::InvalidModelSequence(format!(
-                        "duplicate tool call id: {:?}",
-                        call.call_id
-                    )));
+                let mut batch_ids = BTreeSet::new();
+                for call in &tool_calls {
+                    if call.call_id.trim().is_empty() {
+                        return Err(TurnError::InvalidModelSequence(
+                            "tool call id must not be empty".into(),
+                        ));
+                    }
+                    if seen_tool_call_ids.contains(&call.call_id)
+                        || !batch_ids.insert(call.call_id.clone())
+                    {
+                        return Err(TurnError::InvalidModelSequence(format!(
+                            "duplicate tool call id: {:?}",
+                            call.call_id
+                        )));
+                    }
                 }
 
-                tool_rounds += 1;
+                budget.preflight(&tool_calls, &tools)?;
+                seen_tool_call_ids.extend(batch_ids);
 
-                send_progress(&progress, TurnProgress::ToolStarted { call: call.clone() }).await?;
-
-                let result = tools.execute(&call).await;
-                let assistant_prefix = (!content.is_empty()).then_some(content);
-
+                let prefix = (!content.is_empty()).then_some(content);
                 send_progress(
                     &progress,
-                    TurnProgress::ToolFinished {
-                        assistant_prefix: assistant_prefix.clone(),
-                        call: call.clone(),
-                        result: result.clone(),
+                    TurnProgress::ToolBatchStarted {
+                        content: prefix.clone(),
+                        calls: tool_calls.clone(),
                     },
                 )
                 .await?;
+                context.push(ConversationItem::AssistantToolCalls {
+                    content: prefix,
+                    calls: tool_calls.clone(),
+                });
 
-                if let Some(prefix) = assistant_prefix {
-                    context.push(ConversationItem::Message(SessionMessage {
-                        role: MessageRole::Assistant,
-                        content: prefix,
-                    }));
+                for call in tool_calls {
+                    if tools.contains(&call.name) {
+                        budget.consume(&call.name)?;
+                    }
+                    send_progress(&progress, TurnProgress::ToolStarted { call: call.clone() })
+                        .await?;
+                    let result = tools.execute(&call).await;
+                    send_progress(
+                        &progress,
+                        TurnProgress::ToolFinished {
+                            call,
+                            result: result.clone(),
+                        },
+                    )
+                    .await?;
+                    context.push(ConversationItem::ToolResult(result));
                 }
-                context.push(ConversationItem::ToolCall(call));
-                context.push(ConversationItem::ToolResult(result));
             }
             FinishReason::Length => {
                 return Err(TurnError::InvalidModelSequence(
-                    "response was truncated by the output limit".to_string(),
+                    "response was truncated by the output limit".into(),
                 ));
             }
             FinishReason::ContentFilter => {
                 return Err(TurnError::InvalidModelSequence(
-                    "response was stopped by content filtering".to_string(),
+                    "response was stopped by content filtering".into(),
                 ));
             }
         }
@@ -361,18 +377,32 @@ mod tests {
         provider: Arc<FakeProvider>,
         tools: ToolRegistry,
     ) -> (Result<TurnOutput, TurnError>, Vec<TurnProgress>) {
-        let (sender, mut receiver) = mpsc::channel(128);
-        // 有限脚本最多几十个事件；超时用于让意外背压明确失败。
+        run_with_limits(provider, tools, ToolCallLimits::default()).await
+    }
+
+    async fn run_with_limits(
+        provider: Arc<FakeProvider>,
+        tools: ToolRegistry,
+        limits: ToolCallLimits,
+    ) -> (Result<TurnOutput, TurnError>, Vec<TurnProgress>) {
+        let (sender, mut receiver) = mpsc::channel(32);
+        let collector = tokio::spawn(async move {
+            let mut events = Vec::new();
+            while let Some(event) = receiver.recv().await {
+                events.push(event);
+            }
+            events
+        });
         let result = tokio::time::timeout(
             Duration::from_secs(5),
-            run_turn(provider, tools, vec![user()], sender),
+            run_turn(provider, tools, vec![user()], sender, limits),
         )
         .await
-        .unwrap();
-        let mut progress = Vec::new();
-        while let Some(event) = receiver.recv().await {
-            progress.push(event);
-        }
+        .expect("run_turn 等待超时");
+        let progress = tokio::time::timeout(Duration::from_secs(5), collector)
+            .await
+            .expect("事件收集超时")
+            .expect("事件收集任务失败");
         (result, progress)
     }
 
@@ -467,11 +497,10 @@ mod tests {
                 ModelRequest {
                     items: vec![
                         user(),
-                        ConversationItem::Message(SessionMessage {
-                            role: MessageRole::Assistant,
-                            content: "P".into()
-                        }),
-                        ConversationItem::ToolCall(call.clone()),
+                        ConversationItem::AssistantToolCalls {
+                            content: Some("P".into()),
+                            calls: vec![call.clone()],
+                        },
                         ConversationItem::ToolResult(expected_result.clone())
                     ],
                     tools: specs
@@ -479,16 +508,18 @@ mod tests {
             ]
         );
         assert!(matches!(progress.as_slice(), [
-            TurnProgress::ModelStepStarted { step: 1 },
-            TurnProgress::ReasoningDelta { delta: r1 },
-            TurnProgress::TextDelta { delta: prefix },
-            TurnProgress::ToolStarted { call: started },
-            TurnProgress::ToolFinished { assistant_prefix: Some(saved), call: completed, result },
-            TurnProgress::ModelStepStarted { step: 2 },
-            TurnProgress::ReasoningDelta { delta: r2 },
-            TurnProgress::TextDelta { delta: answer },
-        ] if r1 == "R1" && prefix == "P" && started == &call && completed == &call
-            && saved == "P" && result == &expected_result && r2 == "R2" && answer == "A"));
+    TurnProgress::ModelStepStarted { step: 1 },
+    TurnProgress::ReasoningDelta { delta: r1 },
+    TurnProgress::TextDelta { delta: prefix },
+    TurnProgress::ToolBatchStarted { content: Some(saved), calls },
+    TurnProgress::ToolStarted { call: started },
+    TurnProgress::ToolFinished { call: completed, result },
+    TurnProgress::ModelStepStarted { step: 2 },
+    TurnProgress::ReasoningDelta { delta: r2 },
+    TurnProgress::TextDelta { delta: answer },
+] if r1 == "R1" && prefix == "P" && saved == "P" && calls == &vec![call.clone()]
+    && started == &call && completed == &call && result == &expected_result
+    && r2 == "R2" && answer == "A"));
     }
 
     #[tokio::test]
@@ -554,7 +585,10 @@ mod tests {
             provider.requests.lock().unwrap()[1].items,
             vec![
                 user(),
-                ConversationItem::ToolCall(call(1)),
+                ConversationItem::AssistantToolCalls {
+                    content: None,
+                    calls: vec![call(1)]
+                },
                 ConversationItem::ToolResult(ToolResult {
                     call_id: "fixture-call-1".into(),
                     output: "fixture result".into(),
@@ -562,13 +596,11 @@ mod tests {
                 }),
             ]
         );
-        assert!(progress.iter().any(|event| matches!(
-            event,
-            TurnProgress::ToolFinished {
-                assistant_prefix: None,
-                ..
-            }
-        )));
+        assert!(
+            progress
+                .iter()
+                .any(|event| matches!(event, TurnProgress::ToolBatchStarted { content: None, .. }))
+        );
         assert_eq!(
             progress
                 .iter()
@@ -579,7 +611,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn four_tool_calls_allow_a_fifth_model_answer_but_not_a_fifth_tool() {
+    async fn configured_tool_limit_allows_a_final_model_answer() {
         for request_fifth_tool in [false, true] {
             let mut steps: Vec<_> = (1..=4)
                 .map(|index| {
@@ -601,15 +633,25 @@ mod tests {
             });
             let provider = FakeProvider::new(ReasoningOutputPolicy::DisplayOnly, steps);
             let tool = Arc::new(FakeTool::default());
-            let (result, progress) = run(
+            let (result, progress) = run_with_limits(
                 provider.clone(),
                 ToolRegistry::new(vec![tool.clone()]).unwrap(),
+                ToolCallLimits::new(std::collections::BTreeMap::from([(
+                    "fixture_tool".into(),
+                    4,
+                )]))
+                .unwrap(),
             )
             .await;
             if request_fifth_tool {
                 assert!(matches!(
                     result,
-                    Err(TurnError::ToolRoundLimit { limit: 4 })
+                    Err(TurnError::ToolBudgetExceeded(ToolBudgetExceeded {
+                        limit: 4,
+                        used: 4,
+                        requested: 1,
+                        ..
+                    }))
                 ));
             } else {
                 assert_eq!(result.unwrap().assistant.content, "A");
@@ -627,5 +669,275 @@ mod tests {
                 vec![1, 2, 3, 4, 5]
             );
         }
+    }
+
+    struct RecordingTool {
+        events: Mutex<Vec<String>>,
+    }
+
+    impl Tool for RecordingTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "fixture_tool".into(),
+                description: "fixture".into(),
+                input_schema: json!({"type":"object"}),
+            }
+        }
+        fn execute(&self, arguments: serde_json::Value) -> ToolFuture<'_> {
+            Box::pin(async move {
+                let n = arguments["n"].as_u64().unwrap();
+                self.events.lock().unwrap().push(format!("start {n}"));
+                tokio::task::yield_now().await;
+                self.events.lock().unwrap().push(format!("end {n}"));
+                Ok(format!("result {n}"))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_batch_executes_serially_and_replays_one_declaration() {
+        let mut a = call(1);
+        a.arguments = json!({"n":1});
+        let mut b = call(2);
+        b.arguments = json!({"n":2});
+        let provider = FakeProvider::new(
+            ReasoningOutputPolicy::DisplayOnly,
+            vec![
+                vec![
+                    reasoning("R"),
+                    text("P"),
+                    ModelEvent::ToolCall { call: a.clone() },
+                    ModelEvent::ToolCall { call: b.clone() },
+                    finished(FinishReason::ToolCalls),
+                ],
+                vec![text("A"), finished(FinishReason::Stop)],
+            ],
+        );
+        let tool = Arc::new(RecordingTool {
+            events: Mutex::new(Vec::new()),
+        });
+        let (result, _) = run(
+            provider.clone(),
+            ToolRegistry::new(vec![tool.clone()]).unwrap(),
+        )
+        .await;
+        assert_eq!(result.unwrap().assistant.content, "A");
+        assert_eq!(
+            *tool.events.lock().unwrap(),
+            ["start 1", "end 1", "start 2", "end 2"]
+        );
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1].items.len(), 4);
+        assert_eq!(
+            requests[1].items[1],
+            ConversationItem::AssistantToolCalls {
+                content: Some("P".into()),
+                calls: vec![a, b],
+            }
+        );
+        assert!(
+            matches!(&requests[1].items[2], ConversationItem::ToolResult(r)
+        if r.call_id == "fixture-call-1" && r.output == "result 1")
+        );
+        assert!(
+            matches!(&requests[1].items[3], ConversationItem::ToolResult(r)
+        if r.call_id == "fixture-call-2" && r.output == "result 2")
+        );
+    }
+
+    #[tokio::test]
+    async fn an_over_budget_batch_executes_nothing() {
+        let provider = FakeProvider::new(
+            ReasoningOutputPolicy::Reject,
+            vec![vec![
+                ModelEvent::ToolCall { call: call(1) },
+                ModelEvent::ToolCall { call: call(2) },
+                finished(FinishReason::ToolCalls),
+            ]],
+        );
+        let tool = Arc::new(FakeTool::default());
+        let limits = ToolCallLimits::new(std::collections::BTreeMap::from([(
+            "fixture_tool".into(),
+            1,
+        )]))
+        .unwrap();
+        let (result, progress) = run_with_limits(
+            provider,
+            ToolRegistry::new(vec![tool.clone()]).unwrap(),
+            limits,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(TurnError::ToolBudgetExceeded(ToolBudgetExceeded {
+                used: 0,
+                requested: 2,
+                ..
+            }))
+        ));
+        assert_eq!(tool.0.load(Ordering::SeqCst), 0);
+        assert!(
+            !progress
+                .iter()
+                .any(|e| matches!(e, TurnProgress::ToolBatchStarted { .. }))
+        );
+    }
+
+    #[tokio::test]
+    async fn default_tool_limit_accumulates_across_model_steps() {
+        let steps = (1..=51)
+            .map(|i| {
+                vec![
+                    ModelEvent::ToolCall { call: call(i) },
+                    finished(FinishReason::ToolCalls),
+                ]
+            })
+            .collect();
+        let provider = FakeProvider::new(ReasoningOutputPolicy::Reject, steps);
+        let tool = Arc::new(FakeTool::default());
+        let (result, _) = run(
+            provider.clone(),
+            ToolRegistry::new(vec![tool.clone()]).unwrap(),
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(TurnError::ToolBudgetExceeded(ToolBudgetExceeded {
+                limit: 50,
+                used: 50,
+                requested: 1,
+                ..
+            }))
+        ));
+        assert_eq!(tool.0.load(Ordering::SeqCst), 50);
+        assert_eq!(provider.requests.lock().unwrap().len(), 51);
+    }
+
+    #[tokio::test]
+    async fn duplicate_ids_in_a_batch_or_later_step_do_not_execute_again() {
+        for same_batch in [true, false] {
+            let a = ModelEvent::ToolCall { call: call(1) };
+            let steps = if same_batch {
+                vec![vec![a.clone(), a, finished(FinishReason::ToolCalls)]]
+            } else {
+                vec![
+                    vec![a.clone(), finished(FinishReason::ToolCalls)],
+                    vec![a, finished(FinishReason::ToolCalls)],
+                ]
+            };
+            let provider = FakeProvider::new(ReasoningOutputPolicy::Reject, steps);
+            let tool = Arc::new(FakeTool::default());
+            let (result, _) = run(provider, ToolRegistry::new(vec![tool.clone()]).unwrap()).await;
+            assert!(matches!(result, Err(TurnError::InvalidModelSequence(_))));
+            assert_eq!(
+                tool.0.load(Ordering::SeqCst),
+                if same_batch { 0 } else { 1 }
+            );
+        }
+    }
+
+    struct FailingTool(AtomicUsize);
+    impl Tool for FailingTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "fixture_tool".into(),
+                description: "fixture".into(),
+                input_schema: json!({}),
+            }
+        }
+        fn execute(&self, _: serde_json::Value) -> ToolFuture<'_> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Err(crate::ToolError::Execution("fixture failure".into())) })
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_tool_attempts_are_not_refunded() {
+        let provider = FakeProvider::new(
+            ReasoningOutputPolicy::Reject,
+            (1..=3)
+                .map(|i| {
+                    vec![
+                        ModelEvent::ToolCall { call: call(i) },
+                        finished(FinishReason::ToolCalls),
+                    ]
+                })
+                .collect(),
+        );
+        let tool = Arc::new(FailingTool(AtomicUsize::new(0)));
+        let limits = ToolCallLimits::new(std::collections::BTreeMap::from([(
+            "fixture_tool".into(),
+            2,
+        )]))
+        .unwrap();
+        let (result, _) = run_with_limits(
+            provider,
+            ToolRegistry::new(vec![tool.clone()]).unwrap(),
+            limits,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(TurnError::ToolBudgetExceeded(ToolBudgetExceeded {
+                limit: 2,
+                used: 2,
+                ..
+            }))
+        ));
+        assert_eq!(tool.0.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn historical_call_ids_are_still_rejected_without_charging_a_new_turn() {
+        let old = call(1);
+        let provider = FakeProvider::new(
+            ReasoningOutputPolicy::Reject,
+            vec![vec![
+                ModelEvent::ToolCall { call: old.clone() },
+                finished(FinishReason::ToolCalls),
+            ]],
+        );
+        let tool = Arc::new(FakeTool::default());
+        let history = vec![
+            ConversationItem::AssistantToolCalls {
+                content: None,
+                calls: vec![old.clone()],
+            },
+            ConversationItem::ToolResult(ToolResult {
+                call_id: old.call_id,
+                output: "old result".into(),
+                is_error: false,
+            }),
+            user(),
+        ];
+        let (sender, mut receiver) = mpsc::channel(16);
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            run_turn(
+                provider,
+                ToolRegistry::new(vec![tool.clone()]).unwrap(),
+                history,
+                sender,
+                ToolCallLimits::default(),
+            ),
+        )
+        .await
+        .expect("历史 ID 校验超时");
+        assert!(matches!(result, Err(TurnError::InvalidModelSequence(_))));
+        assert_eq!(tool.0.load(Ordering::SeqCst), 0);
+        let progress = tokio::time::timeout(Duration::from_secs(5), async move {
+            let mut progress = Vec::new();
+            while let Some(event) = receiver.recv().await {
+                progress.push(event);
+            }
+            progress
+        })
+        .await
+        .expect("事件收集超时");
+        assert!(matches!(
+            progress.as_slice(),
+            [TurnProgress::ModelStepStarted { step: 1 }]
+        ));
     }
 }

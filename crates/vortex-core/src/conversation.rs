@@ -16,6 +16,10 @@ pub enum MessageRole {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConversationItem {
     Message(SessionMessage),
-    ToolCall(ToolCall),
+    //ToolCall(ToolCall),
+    AssistantToolCalls {
+        content: Option<String>,
+        calls: Vec<ToolCall>,
+    },
     ToolResult(ToolResult),
 }

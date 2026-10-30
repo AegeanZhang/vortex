@@ -1,7 +1,7 @@
 use serde::{Deserialize, de::DeserializeOwned};
 use std::{collections::BTreeMap, fmt, path::PathBuf};
 
-use crate::{ThinkingCapabilitiesOverride, ThinkingOptions};
+use crate::{ThinkingCapabilitiesOverride, ThinkingOptions, ToolCallLimits};
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -67,6 +67,7 @@ pub struct AppConfig {
     pub providers: BTreeMap<String, ProviderConfig>,
     pub models: BTreeMap<String, ModelConfig>,
     pub search: SearchConfig,
+    pub tools: ToolsConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -76,6 +77,7 @@ pub struct UserConfigPatch {
     pub providers: BTreeMap<String, ProviderConfig>,
     pub models: BTreeMap<String, ModelConfig>,
     pub search: Option<SearchPatch>,
+    pub tools: Option<ToolsPatch>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -189,10 +191,6 @@ impl Default for AppConfig {
                         mode: crate::ThinkingMode::Disabled,
                     },
                     thinking_preset: Some("dashscope-qwen-display-only".into()),
-                    /*thinking_capabilities: ThinkingCapabilities {
-                        can_disable: true,
-                        supports_history_control: true,
-                    },*/
                     thinking_capabilities: ThinkingCapabilitiesOverride::default(),
                 },
             )]),
@@ -204,6 +202,7 @@ impl Default for AppConfig {
                 connect_timeout_secs: 5,
                 request_timeout_secs: 20,
             },
+            tools: ToolsConfig::default(),
         }
     }
 }
@@ -234,6 +233,10 @@ impl AppConfig {
             if let Some(v) = patch.request_timeout_secs {
                 self.search.request_timeout_secs = v;
             }
+        }
+
+        if let Some(patch) = patch.tools {
+            self.tools.call_limits.extend(patch.call_limits);
         }
     }
 
@@ -341,6 +344,9 @@ impl AppConfig {
         {
             return Err(ConfigError::Invalid("搜索环境变量、条数或超时不合法"));
         }
+
+        ToolCallLimits::new(self.tools.call_limits.clone())
+            .map_err(|_| ConfigError::Invalid("tools.call_limits 的名称或次数不合法"))?;
         Ok(())
     }
 
@@ -842,4 +848,53 @@ supports_history_control = false
             ThinkingMode::Disabled
         );
     }
+
+    #[test]
+    fn tool_limits_merge_by_name_and_reject_zero() {
+        let mut config = AppConfig::default();
+        let patch: UserConfigPatch =
+            toml::from_str("[tools.call_limits]\nlist_directory = 80\n").unwrap();
+        config.apply_user(patch);
+        config.validate_definitions().unwrap();
+        assert_eq!(config.tools.call_limits["web_search"], 4);
+        assert_eq!(config.tools.call_limits["list_directory"], 80);
+        config.tools.call_limits.insert("web_search".into(), 0);
+        assert!(config.validate_definitions().is_err());
+    }
+
+    #[test]
+    fn tool_limits_are_not_project_or_cli_fields() {
+        assert!(
+            toml::from_str::<ProjectConfigPatch>("[tools.call_limits]\nweb_search = 100\n",)
+                .is_err()
+        );
+        assert!(
+            AppConfig::default()
+                .apply_override("tools.call_limits.web_search=100")
+                .is_err()
+        );
+        for value in ["-1", "4294967296", "\"4\""] {
+            let text = format!("[tools.call_limits]\nweb_search = {value}\n");
+            assert!(toml::from_str::<UserConfigPatch>(&text).is_err());
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolsConfig {
+    pub call_limits: BTreeMap<String, u32>,
+}
+
+impl Default for ToolsConfig {
+    fn default() -> Self {
+        Self {
+            call_limits: ToolCallLimits::default().overrides().clone(),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ToolsPatch {
+    pub call_limits: BTreeMap<String, u32>,
 }

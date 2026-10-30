@@ -1,6 +1,6 @@
 # 应用启动与依赖装配设计
 
-核对日期：2026-10-27。状态：当前 TUI 实现契约。架构归属：应用入口与装配。
+核对日期：2026-10-30。状态：当前 TUI 实现契约。架构归属：应用入口与装配。
 源码入口：[main.rs](../../../crates/vortex-cli/src/main.rs)、[bootstrap.rs](../../../crates/vortex-cli/src/bootstrap.rs)。
 
 ## 输入、产物与边界
@@ -12,12 +12,14 @@ main 读取 CLI，解析 AppPaths 并初始化日志；bootstrap 接收路径、
 ## 装配顺序
 
 1. clap 处理参数、help/version；随后解析 HOME/cwd 和日志路径并初始化一次 subscriber。
-2. TUI 分支在 spawn_blocking 中 load_config，打印安全的来源诊断；不自动读取 .env。
+2. TUI 分支在 spawn_blocking 中 load_config，打印安全的来源诊断；从 config.tools.call_limits
+   构造独立 ToolCallLimits，再将配置移入后续工厂；不自动读取 .env。
 3. 在阻塞池打开启动 cwd 为 WorkspaceFs，先注册目录工具，再按配置选择秘塔或 Mock。
    仅秘塔读取搜索 key，关闭搜索仍保留目录工具，注册表保持固定且顺序稳定。
 4. 从实际 specs 计算 requires_tools，构造关闭重定向/自动重试的模型 client 与工厂。
 5. ModelManager 校验初始候选，工厂先校验选项再按需读所选模型 key，本地构造 Provider。
-6. 输出安全模型信息，start_session 启动 actor 后返回连接；TUI 才初始化终端并运行事件循环。
+6. 输出安全模型信息，start_session_with_tool_limits 注入规则、启动 actor 后返回连接；
+   TUI 才初始化终端并运行事件循环。start_session 保留使用默认规则的兼容入口。
 
 模型/工具的构造不是实际模型请求；只有流被 poll 才开始调用模型。整个装配并非数据库事务：
 失败前已经创建的日志仍可能保留，不承诺自动删除或回滚用户目录。

@@ -30,7 +30,10 @@ pub struct ModelRequest {
 
 pub enum ConversationItem {
     Message(SessionMessage),
-    ToolCall(ToolCall),
+    AssistantToolCalls {
+        content: Option<String>,
+        calls: Vec<ToolCall>,
+    },
     ToolResult(ToolResult),
 }
 ```
@@ -44,9 +47,18 @@ ConversationItem、SessionMessage、Snapshot 或后续请求。工具前后由 M
 划分展示条目，不改变权威历史。下文的思考保存/回传类型是后续目标，不能用当前
 reasoning 字符串展示推断已支持 DeepSeek 工具思考历史。
 
-每个工具步骤按 Assistant 前缀（如有）、ToolCall、ToolResult 的顺序回填；最终成功回答
-另写一次，后续失败不撤销已经完成的工具步骤。ToolRegistry 将工具错误转换为结果，
-参数由工具实现手动校验，尚无通用 Schema 验证器。执行前拒绝空白和历史/本轮重复 ID。
+一次模型响应的前缀与全部调用保存为一条 AssistantToolCalls，随后按调用顺序追加各个
+ToolResult。不存在独立的前缀 Message 或逐调用的 Assistant 声明；Provider 不靠相邻项
+猜测分组。完整批次必须与全部结果共同保留，后续裁剪也不得拆散这个原子组。
+
+整批 ID 与预算校验通过后才写声明；预检失败的批次不进入历史。最终成功回答另写一次，
+后续失败不撤销已经完成的工具结果。若工具任务中途异常，Session 排空真实进度后补齐
+剩余结果：已开始但无结果标记为未知、可能已有副作用；未开始标记为未执行。补齐用于
+继续会话的协议完整性，不表示重试、回滚或持久化。Shutdown 关闭整个 Session，不要求
+再补齐/发布所有结果。详见 [Session](session-runtime.md)。
+
+ToolRegistry 将工具错误转换为结果；参数由工具实现手动校验，尚无通用 Schema 验证器。
+执行前拒绝空白和批内、历史/本轮跨步骤重复 ID。
 完整执行与测试契约见 [Agent loop](agent-loop.md)。
 
 下文的三层模型、扩展类型和 ContextAssembler 是后续目标，不应按示例字段访问当前
@@ -79,7 +91,8 @@ Provider wire request
 
 ## 扩展数据模型（目标）
 
-以下类型表示后续语义要求，不是当前 Rust 类型定义；具体字段可按所有权和序列化需要调整：
+以下类型表示后续语义要求，不是当前 Rust 类型定义；具体字段可按所有权和序列化需要调整。
+其中独立 ToolCall 项仍须新增批次关联或改为批次结构，保留当前“一次 Assistant 响应”边界：
 
 ```rust
 pub struct ModelRequest {
@@ -185,7 +198,7 @@ pub trait TokenEstimator {
 裁剪顺序如下：
 
 1. 永远保留强制 Instruction、当前用户任务和当前未闭合 Turn 的必要项。
-2. Tool call 与对应 Tool result 作为一个原子组保留或移除，不得只保留一半。
+2. 一次 Assistant 的完整调用批次、前缀和全部对应结果作为原子组保留或移除，不得只保留一半。
 3. 优先保留最近的完整 Turn，从最早的已完成 Turn 开始移除。
 4. 若存在覆盖被移除区间的 `Summary`，用摘要替代原始历史；不得同时加入摘要和它覆盖的全部原文。
 5. 超长 Tool 输出优先按工具策略截断，并附加明确的截断标记和原始长度。

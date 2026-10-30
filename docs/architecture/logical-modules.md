@@ -1,6 +1,6 @@
 # 逻辑模块与职责边界
 
-核对日期：2026-10-27。本文按职责划分当前系统，不要求一个逻辑模块对应一个文件或
+核对日期：2026-10-30。本文按职责划分当前系统，不要求一个逻辑模块对应一个文件或
 crate。物理组织见 [仓库结构](repository-structure.md)，后续拆分建议见 [架构演进](evolution.md)。
 
 ## 模块与实现对应
@@ -11,7 +11,7 @@ crate。物理组织见 [仓库结构](repository-structure.md)，后续拆分�
 | 配置管理 | `vortex-core/src/config.rs` | ConfigPaths/覆盖 → LoadedConfig |
 | 模型管理 | `vortex-core/src/model.rs`、`vortex-cli/src/model_factory.rs` | ModelFactory → ModelManager → 当前 Provider |
 | Session 调度 | `vortex-core/src/session.rs` | AgentCommand → CoreEvent，管理 Turn task |
-| Turn 执行与历史构建 | `vortex-core/src/{agent_loop,conversation}.rs` | ModelRequest/ModelEvent、ToolCall/ToolResult → TurnProgress/TurnOutput |
+| Turn 执行与历史构建 | `vortex-core/src/{agent_loop,conversation,tool_budget}.rs` | ModelRequest/ModelEvent、ToolCall/ToolResult、额度 → TurnProgress/TurnOutput |
 | 模型协议适配 | `vortex-provider/src/openai_chat/`、`sse_transport.rs`；Core 的 `provider.rs` 定义契约 | ModelProvider → 外部 HTTP → ModelStream |
 | 工具执行与资源访问 | `vortex-core/src/tool.rs`、`vortex-tools/src/` | ToolRegistry → Tool → 归一化 ToolResult |
 | 终端交互与展示 | `vortex-tui/src/` | SessionConnection、终端事件 → UiAction/Effect → 画面 |
@@ -55,11 +55,12 @@ Session 选择命令与 Provider 构造接口。相关设计：[模型管理](..
 ## 4. Session 调度
 
 负责会话生命周期、命令串行化、一个活跃 Turn、权威历史提交及公共事件发布。
-`start_session` 启动 actor 后立即返回 Snapshot、AgentHandle 和单消费者 CoreEventStream；
+`start_session_with_tool_limits` 注入配置规则；`start_session` 保留默认规则入口。
+两者启动同一 actor 后立即返回 Snapshot、AgentHandle 和单消费者 CoreEventStream；
 Snapshot 是启动时副本，不是共享可变状态。
 
 actor 独占 `history`、`SessionStatus`、ModelManager 与任务集合；接受 Prompt 后创建
-Turn task，消费其进度，先排空进度再发布完成/失败终态。业务命令走 mpsc，Shutdown
+Turn task，消费其批次声明和逐项结果；排空真实进度、补齐异常结果后发布终态。业务命令走 mpsc，Shutdown
 走独立 watch，避免关闭通知排在普通命令或 UI 背压后面。
 
 不理解厂商 JSON 或终端控件，不做 Markdown 渲染，当前也不落盘或恢复会话。
@@ -67,13 +68,14 @@ Turn task，消费其进度，先排空进度再发布完成/失败终态。业�
 
 ## 5. Turn 执行与历史构建
 
-`run_turn` 接收固定 Provider、ToolRegistry、历史副本与进度发送端。它构造
+`run_turn` 接收固定 Provider、ToolRegistry、历史副本、进度发送端与 ToolCallLimits。它构造
 `ModelRequest { items, tools }`，消费语义流，按结束原因返回回答或执行工具并再次请求模型。
 局部状态包括上下文副本、当前步骤正文、工具调用 ID 集合、工具预算和思考字节计数。
 
-每步最多一个工具调用，每 Turn 最多四次工具执行；第五次模型请求仍可返回最终正文。
-工具步骤完成后，局部上下文与 Session 分别追加 Assistant 前缀、调用及结果；Session
-通过进度记录权威历史，最终成功正文通过 TurnOutput 提交。两者不是共享同一个 Vec。
+每步接受多个调用，先做整批 ID/额度预检，再顺序执行；web_search 每 Turn 默认 4 次，
+其他工具每种默认 50 次，用户可逐名覆盖，失败不退额。TurnToolBudget 每用户 Turn 新建，
+不与模型步骤或 Token 预算混用。批次前缀和全部调用是一条 AssistantToolCalls，局部上下文
+与 Session 各自追加声明和逐项结果；权威历史通过进度提交，最终正文通过 TurnOutput 提交。
 
 ReasoningDelta 根据 Provider 消费策略拒绝或转发，仅计数、不写入历史；TUI 保留显示文本。
 此模块不是完整 ContextAssembler：尚无指令加载、system prompt 装配、Token 裁剪或摘要。
@@ -100,7 +102,7 @@ Core 定义 Tool、调用/结果及 ToolRegistry；注册表保存 `Vec<Arc<dyn 
 声明，实际参数校验由工具实现完成，没有通用 Schema 验证器或统一审批中间件。
 
 CLI 固定先注册目录工具，再按配置选装秘塔或 Mock 搜索。目录工具持有已打开的根句柄
-和后台并发额度；搜索工具持有 HTTP client、凭据与预算。资源规则留在具体实现，
+和后台并发额度；搜索工具持有 HTTP client、凭据、超时和大小限制。调用次数归 Turn，资源规则留在具体实现，
 注册表不伪造所有工具具有同一种超时/取消能力。
 
 目录只列一层、不读正文、不启动 Shell；路径边界、网络调用与输出预算见

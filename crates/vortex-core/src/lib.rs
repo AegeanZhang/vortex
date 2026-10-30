@@ -4,6 +4,7 @@ mod model;
 mod provider;
 mod session;
 mod tool;
+mod tool_budget;
 
 pub mod config;
 
@@ -16,6 +17,9 @@ pub use provider::{
 };
 pub use session::{
     AgentCommand, AgentHandle, CoreEvent, CoreEventStream, SessionConnection, SessionError,
-    SessionSnapshot, SessionStatus, start_session,
+    SessionSnapshot, SessionStatus, start_session, start_session_with_tool_limits,
 };
 pub use tool::{Tool, ToolCall, ToolError, ToolFuture, ToolRegistry, ToolResult, ToolSpec};
+pub use tool_budget::{
+    DEFAULT_TOOL_CALL_LIMIT_PER_TURN, ToolBudgetExceeded, ToolCallLimits, ToolCallLimitsError,
+};

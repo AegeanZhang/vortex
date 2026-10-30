@@ -54,7 +54,9 @@ TUI <────────CoreEventStream───────── Session 
 | `AgentCommand` | `SubmitPrompt`、`SelectModel { model_id }` 和 `Shutdown` |
 | `CoreEvent` | 用户/Assistant、模型步骤、思考增量、工具和 Turn 事件；普通拒绝与模型选择确认/拒绝分别表达 |
 
-`start_session(ModelManager, ToolRegistry)` 创建容量为 32 的命令 channel 和容量为
+`start_session(ModelManager, ToolRegistry)` 使用内置 ToolCallLimits；CLI 使用
+`start_session_with_tool_limits(models, tools, limits)` 注入已加载的用户规则。两者共用一个
+actor 实现，创建容量为 32 的命令 channel 和容量为
 128 的事件 channel，并启动一个 Tokio task；每个 Turn 另建容量为 32 的 `TurnProgress`
 channel。无工具调用方使用 `ToolRegistry::empty()`；思考是否可消费由本 Turn Provider
 的 Reject/DisplayOnly 策略决定，与注册表是否为空无关。
@@ -64,7 +66,7 @@ channel。无工具调用方使用 `ToolRegistry::empty()`；思考是否可消�
 
 ## 启动顺序与三个执行角色
 
-CLI 的 TUI 分支先经 bootstrap 调用 `start_session(models, tools)`，再执行
+CLI 的 TUI 分支先经 bootstrap 调用 `start_session_with_tool_limits(models, tools, limits)`，再执行
 `run(connection, tui_options).await`。两者不是“Session 执行完才启动 TUI”：
 
 1. `start_session` 创建 channel，通过 `tokio::spawn` 启动后台 Session loop，随后返回
@@ -164,17 +166,19 @@ Session actor 独占 `ModelManager`、`history`、`status`、`ActiveTurn` 和
 事件循环使用 `tokio::select!` 等待命令、TurnProgress、关闭信号和
 UI 消费者关闭；先得到 `RuntimeInput`，再更新状态，避免跨分支借用活跃 Turn。
 
-- `history: Vec<ConversationItem>` 是权威请求历史，保存已接受的 User、已完成工具步骤
-  的 Assistant 前缀/调用/结果，以及最终成功 Assistant。
+- `history: Vec<ConversationItem>` 是权威请求历史，保存已接受的 User、已声明的
+  AssistantToolCalls 批次、对应真实或异常补齐的结果，以及最终成功 Assistant。
 - `status` 为 `Running` 时拒绝新的 Prompt，因此逻辑上最多只有一个活跃 Turn。
-- `ActiveTurn` 只保存 TurnProgress 接收端；不再累积正文或保存模型 outcome。
+- `ActiveTurn` 保存 TurnProgress 接收端及 `pending_tools: VecDeque<PendingTool>`；
+  队列记录尚无结果的调用及是否已开始，不累积正文、Thinking 或模型 outcome。
 - 初始模型和目录先克隆到 snapshot；manager 的所有后续选择只能由 actor 串行处理。
 - `run_turn` 独占进度发送端，累积每个模型步骤的正文并维护本地 `context`；不直接修改
-  Session 权威历史。工具步骤通过 ToolFinished 回填，最终回答通过 TurnOutput 返回。
+  Session 权威历史。ToolBatchStarted 写批次声明，ToolFinished 逐项回填，最终回答通过 TurnOutput 返回。
 - 每次模型请求前发送 ModelStepStarted；按 Provider 输出策略转发思考增量。展示-only
   思考不在 Session 累积，不进入 history 或 snapshot，事件发送仍监听 Shutdown。
-- actor 等进度通道排空并关闭，再 `join_next()` 回收任务；只有正常返回 `Ok(TurnOutput)`
-  才提交最终 Assistant 并发布 TurnCompleted，任务错误或 panic 统一失败。
+- actor 等进度通道排空并关闭，再可取消地 `join_next()` 回收任务；补齐尚未闭合的调用后，
+  只有正常返回 `Ok(TurnOutput)` 且无未完成调用才提交最终 Assistant、发布 TurnCompleted。
+  任务错误、panic 或异常遗留调用统一失败。
 - `Shutdown`、所有命令句柄关闭或事件消费者消失时，actor 中止活跃 task 并退出。
 
 向 UI 发布事件统一经过 `publish_event`，同时监听关闭信号。即使 UI 队列已满，Shutdown
@@ -191,7 +195,8 @@ SubmitPrompt
   -> AssistantMessageStarted
   -> ModelStepStarted(1) -> run_turn：ModelProvider::stream
   -> [AssistantReasoningDelta（仅 DisplayOnly，可选）、AssistantTextDelta（可选前缀）
-      -> ToolCallStarted -> ToolCallFinished
+      -> 内部 ToolBatchStarted（保存一条批次声明，不向 TUI 转发）
+      -> (ToolCallStarted -> ToolCallFinished) × 本批调用数，顺序执行
       -> ModelStepStarted(n+1) -> 再次 ModelProvider::stream]（零到多次）
   -> AssistantReasoningDelta（仅 DisplayOnly，可选）
   -> AssistantTextDelta（最终回答，一次或多次）
@@ -207,13 +212,13 @@ Finished 是每个模型步骤的 Provider 事件，不直接发给 TUI。ToolCa
 不是结束整个 Turn；仅在最终步骤以 Stop 结束、正文非空且任务正常返回时成功。
 最终 Assistant 只写入历史一次，不重发完整正文 Delta。
 
-Provider 错误、缺少终态、task 异常、Length、ContentFilter、空最终正文、工具轮数超限
+Provider 错误、缺少终态、task 异常、Length、ContentFilter、空最终正文、工具调用额度超限
 或非法调用 ID 均导致 Failed 和一次 TurnFailed。Reject 策略收到 ReasoningDelta 或
 DisplayOnly 思考超过每步字节上限时，run_turn 失败并释放流；Session 排空已发送进度后
 统一收尾，不等远端生成完毕。只有思考而无最终正文也不能以 Stop 成功。
 未知工具、工具参数/执行错误则成为错误 ToolResult，交给下一步模型处理，不直接失败。
 
-本轮已接受的 User 及已完成的工具步骤保留，但失败模型步骤的部分 Assistant 不进入
+本轮已接受的 User、已声明批次与已完成的工具结果保留，但失败模型步骤的部分 Assistant 不进入
 `history`；TUI 可保留已显示片段并标记错误。Failed 不阻止下一次提交：有效 Prompt
 重新进入 Running，
 成功后回到 `Idle`。下一轮可能包含连续 User 消息，当前不回滚也不自动重试。
@@ -230,7 +235,7 @@ Session 只消费 ModelProvider 的语义流，不使用 Reqwest/SSE/厂商 DTO�
 
 每个 Turn 的 `run_turn` 任务由 `JoinSet<Result<TurnOutput, TurnError>>` 管理，使用独占的
 有界 TurnProgress 通道（容量 32）。任务处理多个模型步骤，进度发送端只由该任务持有。
-actor 的 ActiveTurn 只保存接收端；正文、步骤编号、思考字节计数和每步结束原因由 run_turn 管理。它维护历史
+actor 的 ActiveTurn 保存接收端与待结果队列；正文、步骤编号、调用额度、思考字节计数和每步结束原因由 run_turn 管理。它维护历史
 副本，不直接修改权威历史，也不把完整回答再次发送给 TUI。
 
 | 输入 | 处理位置与行为 |
@@ -238,10 +243,11 @@ actor 的 ActiveTurn 只保存接收端；正文、步骤编号、思考字节�
 | 有效 SubmitPrompt | 记录 User，发 UserMessageAdded、AssistantMessageStarted，启动本轮任务 |
 | TurnProgress::TextDelta | 发布 AssistantTextDelta；仍为 Running |
 | ModelStepStarted / 合法 ReasoningDelta | 转发步骤/思考事件；思考仅展示，不提交历史；仍为 Running |
-| ToolStarted / ToolFinished | 发布工具事件；完成步骤写入前缀/调用/结果，仍为 Running |
+| ToolBatchStarted | 一次写入前缀与全部调用，初始化待结果队列；不新增公共 CoreEvent |
+| ToolStarted / ToolFinished | 按队首核对调用与结果 ID；标记已开始或写入真实结果并出队，发布工具事件 |
 | 模型 Finished(ToolCalls) | run_turn 执行工具并再次调用模型，不结束 Turn |
 | Reject 策略收到 ReasoningDelta、思考超限或 Provider Err | run_turn 返回错误并释放流；此前进度排空后统一失败 |
-| 通道关闭 | 回收本轮 task，依据 TurnOutput/TurnError 或 JoinError 提交成功/失败 |
+| 通道关闭 | 可取消地回收 task，补齐未完成调用，再依据任务结果发布成功/失败 |
 | Running 时再次提交 | CommandRejected；不改当前缓冲、状态或历史 |
 | Shutdown / UI 消失 | 中止任务、丢弃活跃流并关闭 Session；不自动重试 |
 
@@ -255,6 +261,23 @@ Shutdown。因此使用内部 `watch<bool>` 关闭信号：`AgentHandle::send(Sh
 actor 的主 select 和每一次事件发送均监听关闭；外部 AgentCommand 形状不变。所有句柄
 关闭、消费者消失、错误提前返回也必须释放 JoinSet，从而中止网络任务。通知发送成功不代表
 取消已经完成，测试需要另外观察活跃流释放及事件通道关闭。
+
+## 批次异常补齐与关闭边界
+
+整批 ID/额度预检通过才有 ToolBatchStarted；超限批次不写声明、也不执行工具。
+声明后 actor 按 FIFO 消费真实进度，完成一项就写结果并移出待结果队列。
+只有进度通道排空且任务已回收，才对剩余队列执行 `repair_unfinished`：
+
+- 已收到 ToolStarted、尚无结果：补错误 ToolResult，明确结果未知，可能已有副作用。
+- 尚未开始：补错误 ToolResult，明确因本轮终止而未执行。
+- 已收到真实结果：原样保留，不重复补写，也不把成功改成失败。
+
+补齐按原调用顺序入历史，并通过 ToolCallFinished 发布后再发 TurnFailed；因此未开始的
+调用也可能收到补齐的 Finished，而没有 Started。下一次有效输入可使用完整配对的历史。
+即使 task 意外返回 Ok，只要仍有待补调用也不能发布成功。补齐不是回滚、重试或副作用确认。
+
+Shutdown/UI 消费者消失会中断 join 与发布，关闭整个 Session；不要求为了补齐事件等待 UI
+排空，不承诺关闭路径落盘或完整发布剩余结果。当前没有 CancelTurn 或历史恢复。
 
 ## 单元测试矩阵
 
@@ -274,11 +297,13 @@ actor 的主 select 和每一次事件发送均监听关闭；外部 AgentComman
 | 同上 | Thinking 中失败/退出/满队列 | 保留已完成工具历史，失败 Assistant 不入历史；Shutdown 释放活跃流 |
 | 同上 | `Shutdown` 与背压 | 活跃流及阻塞的事件发送可被中断，事件流最终关闭 |
 | 同上 | 工具步骤后模型失败 | 保留完成的前缀/调用/结果，失败部分正文不入历史 |
+| 同上 | 三调用中第二项 panic | 第一项真实成功保留，第二项结果未知、第三项未执行；下一轮历史全部配对 |
+| 同上 | 超限批次/新用户 Turn | 拒绝批次不进历史，新 Turn 获得新的按工具额度 |
 | 同上 | 空闲/Failed 切换后再提交 | 下一轮使用新 Provider，历史只带一次，不新增 slash 消息 |
 | 同上 | Running 拒绝、未知/不可用/缺密钥、相同 ID | 专用结果事件，失败保留原绑定；同 ID 也确认 |
 | 同上 | 模型确认发布遇到背压 | Shutdown 仍能结束；选择不改 status 或配置文件 |
 | `vortex-core/src/model.rs` | 目录与实例绑定 | 重复 ID 拒绝、同 ID 幂等、失败不部分更新 |
-| `vortex-core/src/agent_loop.rs`、`tool.rs` | 工具闭环与异常 | 结果回填、错误恢复、轮数和 ID 校验；详见 agent-loop.md |
+| `vortex-core/src/agent_loop.rs`、`tool_budget.rs`、`tool.rs` | 工具闭环与异常 | 批次回填、顺序执行、按工具额度及 ID 校验；详见 agent-loop.md |
 
 
 模型目录/工厂的专项以 [模型管理](model-management.md) 为准；HTTP/SSE 映射矩阵见

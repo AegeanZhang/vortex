@@ -1,6 +1,6 @@
 # 关键运行链路
 
-核对日期：2026-10-26。本文展示当前 TUI 主链路；职责映射见 [逻辑模块](logical-modules.md)，
+核对日期：2026-10-30。本文展示当前 TUI 主链路；职责映射见 [逻辑模块](logical-modules.md)，
 通道、状态和错误细节以 [Session 设计](../design/runtime/session-runtime.md) 为准。
 
 ## 1. 启动与对象装配
@@ -15,18 +15,19 @@ sequenceDiagram
     Note over CLI: 解析参数、HOME/cwd，初始化文件日志
     CLI->>Config: spawn_blocking(load_config)
     Config-->>CLI: LoadedConfig 与来源
-    Note over CLI: 打开启动 cwd 句柄，注册目录与可选搜索工具
+    Note over CLI: 取出 ToolCallLimits，打开 cwd，注册目录与可选搜索
     CLI->>Factory: 构造工厂，按实际工具判断能力
     CLI->>Factory: ModelManager::new / create(initial)
     Factory-->>CLI: 校验选项后读取 key，本地构造 Provider
-    CLI->>Session: start_session(models, tools)
+    CLI->>Session: start_session_with_tool_limits(models, tools, limits)
     Note over Session: 创建通道并 tokio::spawn(actor)
     Session-->>CLI: SessionConnection
     CLI->>UI: run(connection, options).await
     Note over UI: 初始化终端，进入事件循环
 ```
 
-`start_session` 是启动并返回连接，不等待会话结束。TUI loop 在调用它的异步任务中
+两个 Session 启动入口均启动并返回连接，不等待会话结束；`start_session` 使用默认规则。
+TUI loop 在调用它的异步任务中
 运行，Session actor 是另一个 Tokio task；接受 Prompt 后才创建本轮 Turn task。
 它们由同一运行时调度，不要求各占一个线程。日志 guard 保持到 main 结束。
 
@@ -41,35 +42,42 @@ sequenceDiagram
     participant R as ToolRegistry / Tool
     UI->>S: AgentHandle.send(SubmitPrompt)
     Note over S: 校验状态，追加 User，发布用户及 Assistant 开始事件
-    S->>T: spawn(固定 Provider、历史副本、Tools)
+    S->>T: spawn(固定 Provider、历史副本、Tools、limits)
     loop 每个模型步骤
         T-->>S: ModelStepStarted
         T->>P: stream(ModelRequest)
         P-->>T: TextDelta / ReasoningDelta / ToolCall / Finished
         T-->>S: 正文或允许的思考增量
         S-->>UI: 对应 CoreEvent
-        alt ToolCalls 结束且通过 ID/预算校验
-            T-->>S: ToolStarted
-            T->>R: execute(call)
-            R-->>T: ToolResult，工具错误也归一化为结果
-            T-->>S: ToolFinished(prefix, call, result)
-            Note over S: 记录已完成工具步骤，通知 UI
-            Note over T: 追加局部上下文，下一步再次请求模型
+        alt ToolCalls 结束且整批 ID/预算预检通过
+            T-->>S: ToolBatchStarted(content, calls)
+            Note over S: 一次记录 AssistantToolCalls，不新增公共批次事件
+            loop 按顺序逐个调用
+                Note over T: 已注册工具进入执行前扣额
+                T-->>S: ToolStarted(call)
+                T->>R: execute(call)
+                R-->>T: ToolResult，错误也归一化为结果
+                T-->>S: ToolFinished(call, result)
+                Note over S: 记录真实结果，通知 UI
+            end
+            Note over T: 全部结果回填后再次请求模型
         else Stop 且有最终正文
             Note over T: 返回 TurnOutput，结束循环
         else 协议、流或预算失败
             Note over T: 返回 TurnError，结束循环
         end
     end
-    Note over S: 排空进度通道后取得任务结果
+    Note over S: 排空进度并回收任务；异常时补齐剩余结果，再发失败终态
     S-->>UI: TurnCompleted 或 TurnFailed
 ```
 
 图展示逻辑顺序，不表示正文、思考和工具增量在每个网络包中都同时存在。
-一个 Turn 可包含多个模型步骤；工具执行不是新 Turn。当前每步只接受一个调用，
-每 Turn 最多四次工具执行，第五个模型步骤仍可给最终回答。
+一个 Turn 可包含多个模型步骤，每步可含多个调用；本地顺序执行，工具执行不是新 Turn。
+调用次数按工具名累计：web_search 内置 4，其他工具默认 50；新用户 Turn 重置。
+预检超限则整批不执行、不写声明，模型请求次数没有新增固定上限。
 
-Session 的权威 history 与 Turn 的局部 context 分别更新。已完成工具步骤保留；
+Session 的权威 history 与 Turn 的局部 context 分别更新。已完成工具结果保留，任务中途
+异常时按待结果队列补齐已开始但未知及未开始的调用；Shutdown 不要求冲刷全部补齐事件。
 最终成功 Assistant 只提交一次，失败步骤部分正文不提交。Thinking 仅向 UI 转发，
 每步骤独立计数，不写模型历史。完整规则见 [Agent loop](../design/runtime/agent-loop.md)。
 
@@ -81,7 +89,7 @@ Session 的权威 history 与 Turn 的局部 context 分别更新。已完成工
 | `ModelRequest` | Turn → Provider | 协议无关的完整历史项与工具定义 |
 | wire 请求 / SSE data | Provider ↔ 外部模型 | HTTP 载荷和流帧，不进入 TUI/Core 的公共协议 |
 | `ModelEvent` | Provider → Turn | 正文、思考、完整调用及单步结束原因 |
-| `TurnProgress` | Turn → Session | 内部增量、步骤与已完成工具信息，用于历史提交和事件发布 |
+| `TurnProgress` | Turn → Session | 内部增量、步骤、批次声明及逐项结果，用于历史提交和事件发布 |
 | `TurnOutput` / `TurnError` | Turn task → Session | 任务最终结果，不通过普通进度事件伪造完成 |
 | `CoreEvent` | Session → TUI | 会话与选择结果的实时通知，不是持久化回放日志 |
 | `UiAction` / `Effect` | TUI 内部 | 同步状态转换与待执行操作，不是模型协议 |
